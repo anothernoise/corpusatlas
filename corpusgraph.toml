@@ -1,0 +1,11 @@
+# Sources for shirokoff.ca. Paths are relative to this file, so the module
+# stays portable — nothing here knows where it is checked out.
+
+[[sources]]
+type     = "html_blog"
+path     = "../../blog"
+url_base = "/blog/"
+
+[[sources]]
+type = "radar_scorecards"
+path = "../../architecture-radar/scorecards.json"
