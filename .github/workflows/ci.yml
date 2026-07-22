@@ -1,0 +1,39 @@
+# Standalone CI for corpusgraph.
+#
+# This file is inert while the package lives under tools/corpusgraph in the
+# shirokoff.ca repo — GitHub only reads workflows from the repository root. It
+# activates the moment the package is extracted into its own repository
+# (see README → "Extracting this into its own repository"), so the split lands
+# with working CI on day one.
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (no runtime deps by design)
+        run: python -m pip install -e .
+
+      - name: Console script is wired
+        run: corpusgraph --help
+
+      - name: Tests
+        # tests/ carries self-contained fixtures and exercises the full
+        # adapters -> extract -> merge -> emit pipeline. Building an actual
+        # corpus (with real source paths) is the *consuming* repo's CI job,
+        # not the library's — see README.
+        run: python tests/run.py

@@ -26,10 +26,16 @@ adapters → extract (deterministic) → resolve → merge → graph.json
 No third-party dependencies. Python 3.11+.
 
 ```bash
-python3 -m corpusgraph build --config corpusgraph.toml --out ../../knowledge-base/graph.json
-python3 -m corpusgraph stats --graph ../../knowledge-base/graph.json
-python3 -m corpusgraph validate --graph ../../knowledge-base/graph.json
+pip install -e .          # installs the `corpusgraph` console script
+python tests/run.py       # 8 invariant tests, stdlib only
+
+corpusgraph build --config corpusgraph.toml --out graph.json
+corpusgraph stats    --graph graph.json
+corpusgraph validate --graph graph.json
 ```
+
+`python3 -m corpusgraph …` works too, without installing — the console script
+and the module entry point are the same `main()`.
 
 ## Configuration
 
@@ -84,6 +90,13 @@ config, its own tests. When it earns a life of its own:
 git subtree split --prefix=tools/corpusgraph -b corpusgraph
 # then push that branch to a new repo — full history preserved
 ```
+
+Everything needed to stand on its own already ships here: `pyproject.toml`,
+`LICENSE`, `.gitignore`, tests, and `.github/workflows/ci.yml` (inert in the
+site repo, since GitHub only reads workflows from the repository root — it runs
+the moment the package becomes a repository of its own). The site installs this
+as a package and drives it through the `corpusgraph` console script, so the
+split changes the install source and nothing else.
 
 Until there is a second consumer, keeping it here means one commit changes the
 pipeline and the page that renders its output together, and CI needs no

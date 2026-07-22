@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Build output — the graph is generated, never committed inside this package.
+# (In the site repo the artifact lives at knowledge-base/graph.json.)
+graph.json
