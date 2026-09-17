@@ -11,7 +11,7 @@ from .adapters import build as build_adapter
 from .emit import write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
 from .merge import merge
-from .ontology import NODE_TYPES, TIERS
+from .ontology import CONTEXT_TYPES, NODE_TYPES, SEMANTIC_RELATIONS, TIERS
 from .resolve import Resolver
 
 
@@ -19,8 +19,6 @@ def cmd_build(args) -> int:
     cfg = cfgmod.load(args.config)
     docs, sources = [], []
     for spec in cfg.get("sources", []):
-        if args.include_drafts and spec.get("type") == "entity_packs":
-            spec = dict(spec, include_drafts=True)
         adapter = build_adapter(spec)
         got = list(adapter.documents())
         docs.extend(got)
@@ -41,9 +39,9 @@ def cmd_build(args) -> int:
     # to see what the earlier tiers named before it can search for it.
     det = DeterministicExtractor(resolver=resolver)
     det_nodes, det_edges = (list(x) for x in det.run(docs))
-    packs = PacksExtractor()
+    packs = PacksExtractor(resolver=resolver)
     pack_nodes, pack_edges = (list(x) for x in packs.run(docs))
-    mentions = MentionsExtractor(det_nodes + pack_nodes)
+    mentions = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver)
     ment_nodes, ment_edges = (list(x) for x in mentions.run(docs))
 
     for ex_name, n, e in ((det.name, det_nodes, det_edges),
@@ -108,6 +106,14 @@ def cmd_validate(args) -> int:
         # for an inferred one, so an edge without it is not shippable.
         if e.get("prov", {}).get("tier") not in TIERS:
             errs.append(f"edge without a known tier: {e['src']}-{e['rel']}->{e['dst']}")
+    # The renderer draws semantic edges and links context from cards. An edge
+    # that is both — a semantic relation touching an article or a radar call —
+    # would be invisible in one and wrong in the other.
+    types = {n["id"]: n["type"] for n in g["nodes"]}
+    for e in g["edges"]:
+        if e["rel"] in SEMANTIC_RELATIONS and (types.get(e["src"]) in CONTEXT_TYPES
+                                              or types.get(e["dst"]) in CONTEXT_TYPES):
+            errs.append(f"semantic edge touches a context node: {e['src']}-{e['rel']}->{e['dst']}")
     if g["counts"]["nodes"] != len(g["nodes"]) or g["counts"]["edges"] != len(g["edges"]):
         errs.append("counts header disagrees with the payload")
     isolated = ids - ({e["src"] for e in g["edges"]} | {e["dst"] for e in g["edges"]})
@@ -127,8 +133,6 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("build", help="build the graph from a config")
     b.add_argument("--config", default="corpusgraph.toml")
     b.add_argument("--out", required=True)
-    b.add_argument("--include-drafts", action="store_true",
-                   help="include unsigned entity packs (local preview only; never in CI)")
     b.set_defaults(fn=cmd_build)
 
     s = sub.add_parser("stats", help="summarise a built graph")

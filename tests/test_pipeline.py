@@ -6,216 +6,367 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from corpusgraph.__main__ import cmd_validate
 from corpusgraph.adapters.entity_packs import EntityPacksAdapter
 from corpusgraph.emit import write_graph
 from corpusgraph.extract import DeterministicExtractor, MentionsExtractor, PackError, PacksExtractor
 from corpusgraph.merge import merge
 from corpusgraph.model import Document, Edge, Node
-from corpusgraph.ontology import typecheck
-from corpusgraph.resolve import Resolver
+from corpusgraph.ontology import CONTEXT_TYPES, ENTITY_TYPES, RELATIONS, SEMANTIC_RELATIONS, typecheck
+from corpusgraph.resolve import RegistryError, Resolver
+
+REGISTRY = [
+    {"id": "apache-spark", "name": "Apache Spark", "type": "Technology", "aliases": ["Spark"],
+     "options": ["Apache Spark"], "tags": ["spark"], "wikipedia_url": "https://en.wikipedia.org/wiki/Apache_Spark"},
+    {"id": "apache-flink", "name": "Apache Flink", "type": "Technology", "options": ["Apache Flink"]},
+    {"id": "clickhouse", "name": "ClickHouse", "type": "Technology", "options": ["ClickHouse"]},
+    {"id": "apache-druid", "name": "Apache Druid", "type": "Technology", "options": ["Apache Druid", "Druid / Pinot"]},
+    {"id": "apache-pinot", "name": "Apache Pinot", "type": "Technology", "options": ["Druid / Pinot"]},
+    {"id": "snowflake", "name": "Snowflake", "type": "Product", "options": ["Snowflake"], "case_sensitive": True},
+    {"id": "eval-driven-development", "name": "Eval-driven development", "type": "Concept", "radar": ["eval-driven"]},
+    {"id": "microsoft", "name": "Microsoft", "type": "Company"},
+]
 
 
-def docs():
+def resolver():
+    return Resolver(REGISTRY)
+
+
+def corpus():
+    """Two articles, a scorecard with a split option, and radar entries that
+    join to entities in the three ways the radar layer has to handle."""
     return [
-        Document(id="a", title="A", url="/blog/a", kind="article",
-                 tags=("olap",), links=("b",)),
+        Document(id="a", title="A", url="/blog/a", kind="article", tags=("spark", "olap"), links=("b",)),
         Document(id="b", title="B", url="/blog/b", kind="article", tags=("olap",)),
-        Document(id="assessment:x", title="X", url="/architecture-radar/x",
-                 kind="assessment", meta={"platforms": ["ClickHouse", "StarRocks"]}),
+        Document(id="assessment:olap", title="OLAP", url="/architecture-radar/olap", kind="assessment",
+                 meta={"platforms": ["ClickHouse", "Snowflake", "Druid / Pinot"]}),
+        Document(id="radar:clickhouse", title="ClickHouse", url="/architecture-radar/olap", kind="radar-entry",
+                 meta={"entry": "clickhouse", "ring": "trial", "quadrant": "platforms", "assessment": "olap",
+                       "options": ["ClickHouse"], "documented_in": "assessment:olap",
+                       "history": [{"date": "2026-07-08", "event": "added", "ring": "trial"}]}),
+        Document(id="radar:druid-pinot", title="Druid / Pinot", url="/architecture-radar/olap", kind="radar-entry",
+                 meta={"entry": "druid-pinot", "ring": "trial", "options": ["Apache Druid", "Druid / Pinot"],
+                       "documented_in": "assessment:olap"}),
+        Document(id="radar:eval-driven", title="Eval-driven development", url="/blog/a", kind="radar-entry",
+                 meta={"entry": "eval-driven", "ring": "adopt", "options": [], "documented_in": "a"}),
     ]
 
 
-def build(ds):
-    ex = DeterministicExtractor()
-    n, e = ex.run(ds)
-    return merge([list(n)], [list(e)], live_doc_ids={d.id for d in ds})
+def build(docs=None, r=None, live=None):
+    docs = corpus() if docs is None else docs
+    r = r or resolver()
+    n1, e1 = DeterministicExtractor(resolver=r).run(docs)
+    n2, e2 = PacksExtractor(resolver=r).run(docs)
+    n3, e3 = MentionsExtractor(list(n1) + list(n2), resolver=r).run(docs)
+    return merge([list(n1), list(n2), list(n3)], [list(e1), list(e2), list(e3)],
+                 live_doc_ids=live if live is not None else {d.id for d in docs})
 
 
-def test_deterministic_tier_recovers_links_and_tags():
-    nodes, edges = build(docs())
-    rels = {(e.src, e.rel, e.dst) for e in edges}
-    assert ("a", "REFERENCES", "b") in rels
-    assert ("a", "ABOUT", "topic:olap") in rels
-    assert ("assessment:x", "ASSESSES", "tech:clickhouse") in rels
-    assert ("tech:clickhouse", "COMPARES_TO", "tech:starrocks") in rels
+def rels(edges):
+    return {(e.src, e.rel, e.dst) for e in edges}
 
 
-def test_every_edge_carries_provenance():
-    _, edges = build(docs())
+# --- the deterministic tier ---------------------------------------------------
+
+def test_deterministic_tier_recovers_links_tags_and_scorecards():
+    _, edges = build()
+    r = rels(edges)
+    assert ("a", "REFERENCES", "b") in r
+    assert ("a", "ABOUT", "topic:olap") in r
+    assert ("a", "COVERS", "entity:apache-spark") in r
+    assert ("assessment:olap", "ASSESSES", "entity:clickhouse") in r
+    assert ("entity:clickhouse", "COMPARES_TO", "entity:snowflake") in r
+
+
+def test_every_edge_carries_provenance_and_a_tier():
+    _, edges = build()
     assert edges
     for e in edges:
-        assert e.prov.get("doc"), e
-        assert e.prov.get("tier") == "deterministic"
-        assert e.prov.get("extractor")
-
-
-def test_ontology_rejects_ill_typed_triples():
-    assert typecheck("ABOUT", "Document", "Topic")
-    assert not typecheck("ABOUT", "Topic", "Document")     # wrong direction
-    assert not typecheck("ASSESSES", "Document", "Topic")  # wrong types
-    assert not typecheck("INVENTED", "Document", "Topic")  # unknown relation
-
-
-def test_ill_typed_edges_never_reach_the_graph():
-    # A tag edge from a Topic would be ill-typed; the extractor must not emit it.
-    _, edges = build(docs())
-    for e in edges:
-        assert not e.src.startswith("topic:"), "topics must not be edge sources"
+        assert e.prov.get("doc") and e.prov.get("extractor"), e
+        assert e.prov.get("tier") in {"deterministic", "curated", "extracted"}
 
 
 def test_retraction_drops_claims_from_deleted_documents():
-    ds = docs()
-    ex = DeterministicExtractor()
-    n, e = ex.run(ds)
-    # "a" is deleted from the corpus; its claims must not survive.
-    nodes, edges = merge([list(n)], [list(e)], live_doc_ids={"b", "assessment:x"})
-    assert all(edge.prov.get("doc") != "a" for edge in edges)
+    docs = corpus()
+    _, edges = build(docs, live={d.id for d in docs} - {"a"})
+    assert all(e.prov.get("doc") != "a" for e in edges)
 
 
-def test_dangling_edges_are_impossible():
-    nodes, edges = build(docs())
-    ids = set(nodes)
-    for e in edges:
-        assert e.src in ids and e.dst in ids
-
-
-def test_isolated_nodes_are_pruned():
-    ds = docs() + [Document(id="lonely", title="L", url="/blog/l", kind="article")]
-    nodes, _ = build(ds)
+def test_dangling_edges_are_impossible_and_isolated_nodes_pruned():
+    docs = corpus() + [Document(id="lonely", title="L", url="/blog/l", kind="article")]
+    nodes, edges = build(docs)
+    assert all(e.src in nodes and e.dst in nodes for e in edges)
     assert "lonely" not in nodes
 
 
 def test_merge_is_idempotent():
-    ds = docs()
-    ex = DeterministicExtractor()
-    n1, e1 = [list(x) for x in ex.run(ds)]
-    n2, e2 = [list(x) for x in ex.run(ds)]
-    once = build(ds)
-    twice = merge([n1, n2], [e1, e2], live_doc_ids={d.id for d in ds})
-    assert set(once[0]) == set(twice[0])
-    assert {e.key for e in once[1]} == {e.key for e in twice[1]}
+    docs = corpus()
+    det = DeterministicExtractor(resolver=resolver())
+    n1, e1 = det.run(docs)
+    n2, e2 = det.run(docs)
+    live = {d.id for d in docs}
+    once = merge([list(n1)], [list(e1)], live_doc_ids=live)
+    twice = merge([list(n1), list(n2)], [list(e1), list(e2)], live_doc_ids=live)
+    assert set(once[0]) == set(twice[0]) and {e.key for e in once[1]} == {e.key for e in twice[1]}
 
 
-# --- the radar layer: dated calls, and the alias table that grounds them -----
+# --- the ontology --------------------------------------------------------------
 
-ALIASES = [
-    {"canonical": "tech:apache-spark", "label": "Apache Spark", "tags": ["spark"]},
-    {"canonical": "tech:duckdb", "label": "DuckDB", "radar": ["duckdb"]},
-]
-
-
-def radar_docs():
-    """A scorecard, three radar entries that join to it in different ways, and
-    one tagged article — the four shapes the radar layer has to handle."""
-    return [
-        Document(id="a", title="A", url="/blog/a", kind="article", tags=("spark", "olap")),
-        Document(id="assessment:engines", title="Engines", url="/architecture-radar/engines",
-                 kind="assessment", meta={"platforms": ["Apache Spark", "Apache Flink"]}),
-        # Scored: joins to its technology through the scorecard option.
-        Document(id="radar:apache-spark", title="Apache Spark",
-                 url="/architecture-radar/engines", kind="radar-entry",
-                 meta={"entry": "apache-spark", "ring": "adopt", "quadrant": "tools",
-                       "assessment": "engines", "options": ["Apache Spark"],
-                       "documented_in": "assessment:engines",
-                       "history": [{"date": "2026-07-08", "event": "added", "ring": "adopt"}]}),
-        # A practice: no scorecard, and no technology behind it.
-        Document(id="radar:eval-driven", title="Eval-driven development",
-                 url="/blog/a", kind="radar-entry",
-                 meta={"entry": "eval-driven", "ring": "adopt", "options": [],
-                       "documented_in": "a"}),
-        # A technology with no scorecard: only the alias table can name it.
-        Document(id="radar:duckdb", title="DuckDB", url="/blog/a", kind="radar-entry",
-                 meta={"entry": "duckdb", "ring": "trial", "options": [],
-                       "documented_in": "a"}),
-    ]
+def test_ontology_rejects_ill_typed_triples():
+    assert typecheck("IMPLEMENTS", "Technology", "Concept")
+    assert not typecheck("IMPLEMENTS", "Concept", "Technology")    # wrong direction
+    assert not typecheck("INCLUDED_IN", "Technology", "Concept")   # wrong target
+    assert not typecheck("INVENTED", "Technology", "Concept")      # unknown relation
 
 
-def build_radar():
-    ds = radar_docs()
-    ex = DeterministicExtractor(resolver=Resolver(ALIASES))
-    n, e = ex.run(ds)
-    return merge([list(n)], [list(e)], live_doc_ids={d.id for d in ds})
+def test_semantic_relations_never_touch_context_types():
+    assert not ENTITY_TYPES & CONTEXT_TYPES
+    for rel in SEMANTIC_RELATIONS:
+        src, dst = RELATIONS[rel]
+        assert not (src | dst) & CONTEXT_TYPES, rel
 
 
-def test_radar_entry_joins_its_technology_assessment_and_page():
-    _, edges = build_radar()
-    rels = {(e.src, e.rel, e.dst) for e in edges}
-    assert ("tech:apache-spark", "HAS_RADAR_ENTRY", "radar:apache-spark") in rels
-    assert ("radar:apache-spark", "ASSESSED_IN", "assessment:engines") in rels
-    assert ("radar:apache-spark", "DOCUMENTED_IN", "assessment:engines") in rels
+def test_validate_refuses_a_semantic_edge_on_a_context_node():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "g.json"
+        p.write_text(json.dumps({
+            "counts": {"nodes": 2, "edges": 1},
+            "nodes": [{"id": "a", "type": "Document"}, {"id": "entity:x", "type": "Concept"}],
+            "edges": [{"src": "a", "rel": "IMPLEMENTS", "dst": "entity:x",
+                       "prov": {"doc": "a", "tier": "deterministic"}}]}))
+        assert cmd_validate(type("Args", (), {"graph": str(p)})) == 1
 
 
-def test_a_practice_entry_never_invents_a_technology():
-    nodes, edges = build_radar()
-    assert not [e for e in edges if e.rel == "HAS_RADAR_ENTRY" and e.dst == "radar:eval-driven"]
-    # It still reaches the graph, hanging from the page that argues it.
-    assert "radar:eval-driven" in nodes
-    assert ("radar:eval-driven", "DOCUMENTED_IN", "a") in {(e.src, e.rel, e.dst) for e in edges}
+# --- the registry ----------------------------------------------------------------
+
+def test_registry_type_wins_and_ids_are_type_neutral():
+    nodes, _ = build()
+    assert nodes["entity:snowflake"].type == "Product"
+    assert nodes["entity:snowflake"].label == "Snowflake"
+    assert nodes["entity:apache-spark"].urls["wikipedia"].endswith("/Apache_Spark")
 
 
-def test_the_alias_table_grounds_an_entry_with_no_scorecard():
-    nodes, edges = build_radar()
-    assert nodes["tech:duckdb"].type == "Technology"
-    assert nodes["tech:duckdb"].label == "DuckDB"
-    assert ("tech:duckdb", "HAS_RADAR_ENTRY", "radar:duckdb") in {(e.src, e.rel, e.dst) for e in edges}
+def test_a_split_option_fans_out_but_its_parts_are_not_compared():
+    _, edges = build()
+    r = rels(edges)
+    compared = {frozenset((e.src, e.dst)) for e in edges if e.rel == "COMPARES_TO"}
+    for part in ("entity:apache-druid", "entity:apache-pinot"):
+        assert ("assessment:olap", "ASSESSES", part) in r
+        assert frozenset((part, "entity:clickhouse")) in compared
+        assert (part, "HAS_RADAR_ENTRY", "radar:druid-pinot") in r
+    assert frozenset(("entity:apache-druid", "entity:apache-pinot")) not in compared
 
 
-def test_covers_fires_only_for_tags_the_table_calls_technologies():
-    _, edges = build_radar()
-    rels = {(e.src, e.rel, e.dst) for e in edges}
-    assert ("a", "COVERS", "tech:apache-spark") in rels      # "spark" is a technology
-    assert ("a", "ABOUT", "topic:olap") in rels              # "olap" is still a subject
-    assert not [e for e in edges if e.rel == "COVERS" and e.dst != "tech:apache-spark"]
+def test_comparisons_are_stored_once_per_pair():
+    _, edges = build()
+    pairs = [frozenset((e.src, e.dst)) for e in edges if e.rel == "COMPARES_TO"]
+    assert len(pairs) == len(set(pairs))
 
 
-def test_the_ring_stays_on_the_dated_entry_not_the_technology():
-    """"Adopt" was true of an edition. The technology has no ring, ever."""
-    nodes, _ = build_radar()
-    assert nodes["radar:apache-spark"].meta["ring"] == "adopt"
-    assert "ring" not in nodes["tech:apache-spark"].meta
-    assert nodes["radar:apache-spark"].meta["history"][0]["date"] == "2026-07-08"
+def test_radar_entry_joins_its_entity_assessment_and_page():
+    _, edges = build()
+    r = rels(edges)
+    assert ("entity:clickhouse", "HAS_RADAR_ENTRY", "radar:clickhouse") in r
+    assert ("radar:clickhouse", "ASSESSED_IN", "assessment:olap") in r
+    assert ("radar:clickhouse", "DOCUMENTED_IN", "assessment:olap") in r
 
 
-def test_resolution_falls_back_to_slugging_but_never_guesses():
-    bare = Resolver()
-    assert bare.resolve("Apache Spark", "tech") == "tech:apache-spark"
-    assert bare.resolve("Arrow / DataFusion", "tech") == "tech:arrow-datafusion"
-    # Tags and radar entries are table-only: without an entry, no claim.
-    assert bare.resolve("spark", "tag") is None
-    assert bare.resolve("duckdb", "radar") is None
+def test_a_practice_radar_entry_resolves_through_the_registry():
+    _, edges = build()
+    assert ("entity:eval-driven-development", "HAS_RADAR_ENTRY", "radar:eval-driven") in rels(edges)
 
 
-# --- the curated tier: signed packs, never overwriting what was hand-written ---
+def test_the_ring_stays_on_the_dated_entry_not_the_entity():
+    nodes, _ = build()
+    assert nodes["radar:clickhouse"].meta["ring"] == "trial"
+    assert "ring" not in nodes["entity:clickhouse"].meta
 
-def pack_doc(doc_id="pack:spark", edges=None, nodes=None):
+
+def test_tags_and_radar_ids_resolve_only_through_the_table():
+    r = resolver()
+    assert r.resolve("spark", "tag") == ["entity:apache-spark"]
+    assert r.resolve("olap", "tag") == []
+    assert r.resolve("unknown-entry", "radar") == []
+    assert r.resolve("Druid / Pinot", "option") == ["entity:apache-druid", "entity:apache-pinot"]
+    assert r.resolve("Some New Engine", "option") == ["entity:some-new-engine"]
+
+
+def test_the_registry_refuses_duplicates_and_non_entity_types():
+    for bad in ([REGISTRY[0], REGISTRY[0]], [{"id": "x", "name": "X", "type": "Document"}]):
+        try:
+            Resolver(bad)
+        except RegistryError:
+            continue
+        raise AssertionError(f"registry accepted {bad}")
+
+
+# --- the curated tier --------------------------------------------------------------
+
+def pack_doc(entities=None, relationships=None, doc_id="pack:spark"):
     return Document(id=doc_id, title="pack", url="/p", kind="entity-pack", meta={"pack": {
-        "nodes": nodes if nodes is not None else [
-            {"id": "tech:apache-spark", "type": "Technology", "label": "Spark (pack label)",
-             "urls": {"external": {"wikipedia": "https://en.wikipedia.org/wiki/Apache_Spark"}}},
-            {"id": "concept:lazy-evaluation", "type": "Concept", "label": "Lazy evaluation"},
+        "subject": {"id": "apache-spark", "name": "Apache Spark", "type": "Technology"},
+        "authored": {"method": "model-drafted", "model": "m", "drafted": "2026-09-16"},
+        "entities": entities if entities is not None else [
+            {"id": "apache-spark", "name": "Spark (pack label)", "type": "Technology",
+             "short_description": "Distributed engine.", "blog_url": "/blog/a"},
+            {"id": "lazy-evaluation", "name": "Lazy evaluation", "type": "Concept"},
+            {"id": "structured-streaming", "name": "Structured Streaming", "type": "Component"},
         ],
-        "edges": edges if edges is not None else [
-            {"src": "tech:apache-spark", "rel": "USES_CONCEPT", "dst": "concept:lazy-evaluation",
-             "confidence": 1.0, "sources": [{"type": "corpus", "url": "/blog/a"}]},
+        "relationships": relationships if relationships is not None else [
+            {"source_id": "lazy-evaluation", "relationship": "IMPLEMENTED_BY", "target_id": "apache-spark",
+             "confidence": 0.95, "explanation": "Transformations are deferred."},
+            {"source_id": "structured-streaming", "relationship": "COMPONENT_OF", "target_id": "apache-spark",
+             "confidence": 0.99, "explanation": "Ships with Spark."},
         ],
     }})
 
 
-def build_curated(extra_docs=(), live=None):
-    ds = radar_docs() + list(extra_docs)
-    det = DeterministicExtractor(resolver=Resolver(ALIASES))
-    n1, e1 = [list(x) for x in det.run(ds)]
-    n2, e2 = [list(x) for x in PacksExtractor().run(ds)]
-    return merge([n1, n2], [e1, e2], live_doc_ids=live if live is not None else {d.id for d in ds})
+def test_an_inverse_relation_is_stored_canonically_exactly_once():
+    both = [
+        {"source_id": "lazy-evaluation", "relationship": "IMPLEMENTED_BY", "target_id": "apache-spark",
+         "confidence": 0.95, "explanation": "x"},
+        {"source_id": "apache-spark", "relationship": "IMPLEMENTS", "target_id": "lazy-evaluation",
+         "confidence": 0.95, "explanation": "x"},
+    ]
+    _, edges = build(corpus() + [pack_doc(relationships=both)])
+    implements = [(e.src, e.dst) for e in edges if e.rel == "IMPLEMENTS"]
+    assert implements == [("entity:apache-spark", "entity:lazy-evaluation")]
+    _, edges = build(corpus() + [pack_doc()])
+    assert ("entity:apache-spark", "HAS_COMPONENT", "entity:structured-streaming") in rels(edges)
 
 
-def test_scope_is_part_of_edge_identity():
-    a = Edge("tech:x", "ALTERNATIVE_TO", "tech:y", {"doc": "p"}, scope="streaming")
-    b = Edge("tech:x", "ALTERNATIVE_TO", "tech:y", {"doc": "p"}, scope="batch")
-    _, edges = merge([[Node("tech:x", "X", "Technology"), Node("tech:y", "Y", "Technology")]],
-                     [[a, b]], live_doc_ids={"p"})
-    assert len(edges) == 2, "two scopes are two claims; dedupe must not merge them"
+def test_a_symmetric_relation_is_stored_once():
+    both = [
+        {"source_id": "apache-spark", "relationship": "ALTERNATIVE_TO", "target_id": "apache-flink",
+         "confidence": 0.75, "explanation": "x"},
+        {"source_id": "apache-flink", "relationship": "ALTERNATIVE_TO", "target_id": "apache-spark",
+         "confidence": 0.75, "explanation": "x"},
+    ]
+    _, edges = build(corpus() + [pack_doc(relationships=both)])
+    assert len([e for e in edges if e.rel == "ALTERNATIVE_TO"]) == 1
 
+
+def test_a_pack_enriches_a_registered_entity_but_never_relabels_it():
+    nodes, edges = build(corpus() + [pack_doc()])
+    spark = nodes["entity:apache-spark"]
+    assert spark.label == "Apache Spark"                      # the registry's, not the pack's
+    assert spark.meta["description"] == "Distributed engine."
+    assert spark.urls["wikipedia"].endswith("/Apache_Spark")
+    assert ("entity:apache-spark", "PRIMARY_TOPIC_OF", "a") in rels(edges)
+
+
+def test_curated_edges_carry_the_curated_tier_and_the_pack_as_document():
+    _, edges = build(corpus() + [pack_doc()])
+    curated = [e for e in edges if e.rel in ("IMPLEMENTS", "HAS_COMPONENT")]
+    assert curated and all(e.prov["tier"] == "curated" and e.prov["doc"] == "pack:spark" for e in curated)
+
+
+def test_deleting_a_pack_retracts_exactly_its_claims():
+    docs = corpus() + [pack_doc()]
+    nodes, edges = build(docs, live={d.id for d in docs} - {"pack:spark"})
+    assert not [e for e in edges if e.prov.get("doc") == "pack:spark"]
+    assert "entity:lazy-evaluation" not in nodes
+    assert ("entity:clickhouse", "HAS_RADAR_ENTRY", "radar:clickhouse") in rels(edges)
+
+
+def expect_pack_error(pack):
+    try:
+        PacksExtractor(resolver=resolver()).run([pack])
+    except PackError:
+        return
+    raise AssertionError("expected the build to fail")
+
+
+def test_a_type_conflict_with_the_registry_fails_the_build():
+    expect_pack_error(pack_doc(entities=[{"id": "snowflake", "name": "Snowflake", "type": "Technology"}],
+                               relationships=[]))
+
+
+def test_an_ill_typed_semantic_edge_fails_the_build():
+    expect_pack_error(pack_doc(relationships=[
+        {"source_id": "lazy-evaluation", "relationship": "HAS_COMPONENT", "target_id": "apache-spark",
+         "confidence": 1.0, "explanation": "x"}]))
+
+
+def test_an_undeclared_endpoint_fails_the_build():
+    expect_pack_error(pack_doc(relationships=[
+        {"source_id": "apache-spark", "relationship": "IMPLEMENTS", "target_id": "made-up-concept",
+         "confidence": 1.0, "explanation": "x"}]))
+
+
+def test_confidence_and_explanation_are_required():
+    base = {"source_id": "apache-spark", "relationship": "IMPLEMENTS", "target_id": "lazy-evaluation"}
+    for bad in ({"confidence": 1.5, "explanation": "x"}, {"explanation": "x"}, {"confidence": 0.9}):
+        expect_pack_error(pack_doc(relationships=[dict(base, **bad)]))
+
+
+def test_packs_publish_without_any_signing_fields():
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "spark.json").write_text(json.dumps({
+            "subject": {"id": "apache-spark", "name": "Apache Spark", "type": "Technology"},
+            "authored": {"method": "model-drafted", "model": "m", "drafted": "2026-09-16"},
+            "entities": [], "relationships": []}))
+        (Path(d) / "pack.schema.json").write_text("{}")
+        assert [x.id for x in EntityPacksAdapter(d).documents()] == ["pack:spark"]
+
+
+# --- the extracted tier --------------------------------------------------------------
+
+def mentions(vocab, body, r=None):
+    doc = Document(id="m", title="M", url="/blog/m", kind="article", text=body)
+    _, edges = MentionsExtractor(vocab, resolver=r).run([doc])
+    return {e.dst for e in edges}
+
+
+def test_mentions_find_an_entity_never_tagged():
+    vocab = [Node("entity:apache-spark", "Apache Spark", "Technology")]
+    assert mentions(vocab, "We moved the job to Apache Spark last year.") == {"entity:apache-spark"}
+
+
+def test_a_short_alias_needs_two_hits_even_when_the_name_is_long():
+    vocab = [Node("entity:amazon-emr", "Amazon EMR", "CloudService", aliases=("EMR",))]
+    assert mentions(vocab, "It ran on EMR.") == set()
+    assert mentions(vocab, "It ran on EMR. EMR scaled out.") == {"entity:amazon-emr"}
+    assert mentions(vocab, "It ran on Amazon EMR.") == {"entity:amazon-emr"}
+
+
+def test_mentions_never_match_inside_another_word_or_compound():
+    vocab = [Node("entity:apache-kafka", "Kafka", "Technology")]
+    assert mentions(vocab, "Kafkaesque, and Kafka-like, twice: Kafkaesque Kafka-like.") == set()
+
+
+def test_a_parenthetical_acronym_is_searched_for():
+    vocab = [Node("entity:rdd", "Resilient distributed dataset (RDD)", "Concept")]
+    assert mentions(vocab, "An RDD is immutable. Each RDD knows its lineage.") == {"entity:rdd"}
+
+
+def test_the_registry_can_make_matching_case_sensitive():
+    vocab = [Node("entity:snowflake", "Snowflake", "Product")]
+    assert mentions(vocab, "A snowflake schema normalises. The snowflake schema is old.", resolver()) == set()
+    assert mentions(vocab, "Snowflake and Snowflake again.", resolver()) == {"entity:snowflake"}
+
+
+def test_companies_and_context_nodes_are_never_searched():
+    vocab = [Node("entity:microsoft", "Microsoft", "Company"), Node("topic:olap", "olap", "Topic")]
+    assert mentions(vocab, "Microsoft Microsoft Microsoft olap olap olap") == set()
+
+
+def test_mentions_ignore_documents_that_are_not_articles():
+    vocab = [Node("entity:apache-spark", "Apache Spark", "Technology")]
+    doc = Document(id="assessment:x", title="X", url="/x", kind="assessment", text="Apache Spark Apache Spark")
+    assert MentionsExtractor(vocab).run([doc])[1] == []
+
+
+def test_mentions_never_override_a_tag_based_claim():
+    docs = corpus()
+    docs[0] = Document(id="a", title="A", url="/blog/a", kind="article", tags=("spark",),
+                       text="Apache Spark and Apache Spark.")
+    _, edges = build(docs)
+    covers = [e for e in edges if (e.src, e.rel, e.dst) == ("a", "COVERS", "entity:apache-spark")]
+    assert len(covers) == 1 and covers[0].prov["tier"] == "deterministic"
+
+
+# --- the artifact ----------------------------------------------------------------
 
 def test_a_plain_edge_serialises_exactly_as_before():
     e = Edge("a", "REFERENCES", "b", {"doc": "a", "tier": "deterministic"})
@@ -223,150 +374,14 @@ def test_a_plain_edge_serialises_exactly_as_before():
                            "prov": {"doc": "a", "tier": "deterministic"}}
 
 
-def test_curated_edges_carry_the_curated_tier_and_the_pack_as_document():
-    _, edges = build_curated([pack_doc()])
-    curated = [e for e in edges if e.rel == "USES_CONCEPT"]
-    assert curated and all(e.prov["tier"] == "curated" and e.prov["doc"] == "pack:spark"
-                           for e in curated)
-    assert all(e.prov["tier"] == "deterministic" for e in edges if e.rel != "USES_CONCEPT")
-
-
-def test_a_pack_enriches_an_existing_node_but_never_relabels_it():
-    nodes, _ = build_curated([pack_doc()])
-    spark = nodes["tech:apache-spark"]
-    assert spark.label == "Apache Spark"                  # the scorecard's, not the pack's
-    assert spark.urls["wikipedia"].endswith("/Apache_Spark")
-
-
-def test_deleting_a_pack_retracts_exactly_its_claims():
-    ds = radar_docs() + [pack_doc()]
-    live = {d.id for d in ds} - {"pack:spark"}
-    nodes, edges = build_curated([pack_doc()], live=live)
-    assert not [e for e in edges if e.prov.get("doc") == "pack:spark"]
-    assert "concept:lazy-evaluation" not in nodes          # nothing else held it up
-    assert ("tech:apache-spark", "HAS_RADAR_ENTRY", "radar:apache-spark") in \
-        {(e.src, e.rel, e.dst) for e in edges}             # deterministic claims untouched
-
-
-def test_an_ill_typed_curated_edge_fails_the_build():
-    bad = pack_doc(edges=[{"src": "concept:lazy-evaluation", "rel": "HAS_COMPONENT",
-                           "dst": "tech:apache-spark", "confidence": 1.0, "sources": []}])
-    try:
-        PacksExtractor().run([bad])
-    except PackError:
-        return
-    raise AssertionError("an ill-typed signed claim must not be dropped silently")
-
-
-def test_an_alternative_without_scope_fails_the_build():
-    bad = pack_doc(edges=[{"src": "tech:apache-spark", "rel": "ALTERNATIVE_TO",
-                           "dst": "tech:apache-flink", "confidence": 1.0, "sources": []}])
-    try:
-        PacksExtractor().run([bad])
-    except PackError:
-        return
-    raise AssertionError("ALTERNATIVE_TO without a scope is a slogan, not a claim")
-
-
-def test_unsigned_packs_are_not_published():
-    with tempfile.TemporaryDirectory() as d:
-        for name, reviewed in (("signed", "2026-09-16"), ("draft", None)):
-            (Path(d) / f"{name}.json").write_text(json.dumps({
-                "target": {"id": "tech:x", "label": name, "type": "Technology"},
-                "authored": {"reviewed": reviewed, "reviewed_by": reviewed and "a person"},
-                "nodes": [], "edges": []}))
-        (Path(d) / "pack.schema.json").write_text("{}")
-        assert [x.id for x in EntityPacksAdapter(d).documents()] == ["pack:signed"]
-        assert [x.id for x in EntityPacksAdapter(d, include_drafts=True).documents()] == \
-            ["pack:draft", "pack:signed"]
-
-
-def test_the_artifact_is_byte_identical_across_builds():
-    nodes, edges = build_curated([pack_doc()])
+def test_the_artifact_is_byte_identical_and_self_describing():
+    nodes, edges = build(corpus() + [pack_doc()])
     with tempfile.TemporaryDirectory() as d:
         a, b = Path(d) / "a.json", Path(d) / "b.json"
         write_graph(a, nodes, edges, sources=["x"])
         write_graph(b, dict(reversed(list(nodes.items()))), list(reversed(edges)), sources=["x"])
         assert a.read_bytes() == b.read_bytes()
-
-
-# --- the extracted tier: deterministic mention-matching over article text ----
-
-def mention_docs(body):
-    return [
-        Document(id="m", title="M", url="/blog/m", kind="article", text=body),
-    ]
-
-
-def test_mentions_finds_a_technology_never_tagged():
-    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology")]
-    body = "Apache Spark schedules a DAG of stages. " * 2
-    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
-    assert ("m", "COVERS", "tech:apache-spark") in {(e.src, e.rel, e.dst) for e in edges}
-    assert edges[0].prov["tier"] == "extracted"
-
-
-def test_mentions_requires_more_than_one_hit_for_a_short_form():
-    vocab = [Node(id="tech:apache-kafka", label="Kafka", type="Technology")]
-    body = "Kafka is mentioned exactly once here and never again."
-    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
-    assert not edges, "a single passing mention of a short form must not become a claim"
-
-
-def test_mentions_never_matches_a_substring_of_another_word():
-    # "Spark" must not fire on "SparkNotes" or "sparking".
-    vocab = [Node(id="tech:apache-spark", label="Spark", type="Technology")]
-    body = "SparkNotes is unrelated, and sparking plugs are unrelated too. " * 2
-    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
-    assert not edges
-
-
-def test_mentions_finds_a_curated_concept_via_its_parenthetical_alias():
-    # "Resilient distributed dataset (RDD)" should also match on "RDD" alone,
-    # and on the label with the parenthetical stripped — both derived from
-    # what a human already wrote, never guessed.
-    vocab = [Node(id="concept:rdd", label="Resilient distributed dataset (RDD)", type="Concept")]
-    body = "An RDD is immutable. RDDs recompute lost partitions from lineage."
-    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
-    rels = {(e.src, e.rel, e.dst) for e in edges}
-    assert ("concept:rdd", "DISCUSSED_IN", "m") in rels
-
-
-def test_mentions_ignores_non_article_kinds():
-    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology")]
-    docs = [Document(id="assessment:x", title="X", url="/architecture-radar/x",
-                     kind="assessment", text="Apache Spark Apache Spark Apache Spark")]
-    _, edges = MentionsExtractor(vocab).run(docs)
-    assert not edges
-
-
-def test_mentions_never_overrides_an_existing_tag_based_claim():
-    # Same (src, rel, dst) as a deterministic COVERS edge merge() already
-    # keeps — the extracted duplicate must be superseded, not conflict. The
-    # assessment is what gives tech:apache-spark a real Technology node;
-    # without one, DeterministicExtractor's own typecheck would already
-    # drop the tag-based edge before mentions ever runs.
-    ds = [
-        Document(id="a", title="A", url="/blog/a", kind="article", tags=("spark",),
-                 text="Apache Spark Apache Spark Apache Spark"),
-        Document(id="assessment:x", title="X", url="/architecture-radar/x", kind="assessment",
-                 meta={"platforms": ["Apache Spark"]}),
-    ]
-    resolver = Resolver([{"canonical": "tech:apache-spark", "label": "Apache Spark", "tags": ["spark"]}])
-    det = DeterministicExtractor(resolver=resolver)
-    det_nodes, det_edges = (list(x) for x in det.run(ds))
-    ment_nodes, ment_edges = (list(x) for x in MentionsExtractor(det_nodes).run(ds))
-    nodes, edges = merge([det_nodes, ment_nodes], [det_edges, ment_edges],
-                         live_doc_ids={d.id for d in ds})
-    covers = [e for e in edges if e.rel == "COVERS" and e.src == "a" and e.dst == "tech:apache-spark"]
-    assert len(covers) == 1 and covers[0].prov["tier"] == "deterministic"
-
-
-def test_mentions_output_is_idempotent():
-    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology"),
-             Node(id="concept:shuffle", label="Shuffle", type="Concept")]
-    body = "Apache Spark's shuffle moves data across the network. Shuffle is costly."
-    ex = MentionsExtractor(vocab)
-    _, e1 = ex.run(mention_docs(body))
-    _, e2 = ex.run(mention_docs(body))
-    assert {e.key for e in e1} == {e.key for e in e2} and len(e1) == len(e2)
+        g = json.loads(a.read_text())
+        assert set(g["entity_types"]) == ENTITY_TYPES
+        assert g["inverse_labels"]["IMPLEMENTS"] == "IMPLEMENTED_BY"
+        assert all(n["type"] in ENTITY_TYPES | CONTEXT_TYPES for n in g["nodes"])

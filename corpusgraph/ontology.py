@@ -4,140 +4,131 @@ Open-vocabulary extraction over a technical corpus produces a swamp. Fixing the
 types up front turns extraction into classification and — more usefully — lets
 every triple be typechecked before it reaches the graph.
 
-On the radar relations: a RadarEntry is a *dated call*, not a technology. The
-ring and the edition live on that node and are never projected onto the
-Technology it names, because "Spark is Adopt" was true of one edition and
-"Spark" is not a thing that has a ring. Keeping the claim on its own node is
-what lets a reader see when it was made, and what it was before.
+Two kinds of node, and the split is the whole design:
 
-Three relations that look alike and must not become synonyms:
+``ENTITY_TYPES``   What the graph is about: concepts, technologies, products and
+                   their sub-kinds. These are the nodes a reader explores, and
+                   the only nodes the renderer draws.
+``CONTEXT_TYPES``  Where claims about entities were published: articles, radar
+                   assessments, dated radar calls, tags. Evidence, not subjects.
+                   They stay in the artifact so every edge can name its source,
+                   and the renderer shows them as links on an entity's card.
 
-``COMPARES_TO``    Mechanical. Two options were scored on the same axes in one
-                   scorecard. Says nothing about which is better, or for what.
-``ALTERNATIVE_TO`` Editorial. One can stand in for the other *for a workload*,
-                   so it always carries a ``scope``. Spark is an alternative to
-                   Flink for stateful stream processing and to nothing much for
-                   graph analytics; without the scope the edge is a slogan.
-``COMPETES_WITH``  Commercial. Products or vendors chasing the same buyer.
+Core distinction, from the extraction spec:
+  Concept    a general idea, principle or computational model
+  Technology a concrete implementation of one or more concepts
+  Product    a packaged commercial or managed offering built on technologies
+  Component  a subsystem of a larger technology or product
+None of these is a strict hierarchy; typed relationships carry the structure.
+
+A RadarEntry is a *dated call*, not a technology. Its ring and edition live on
+that context node and are never projected onto the entity it names, because
+"Spark is Adopt" was true of one edition and "Spark" has no ring.
 """
 from __future__ import annotations
 
-NODE_TYPES = {
-    # The corpus, recovered deterministically.
-    "Document", "Topic", "Technology", "Assessment", "RadarEntry",
-    # The curated tier: what those technologies are made of and used for.
-    "Concept", "Component", "Product", "Vendor", "Capability", "UseCase",
+ENTITY_TYPES = {
+    "Concept", "ArchitecturePattern",
+    "Technology", "Component", "Language", "API", "Protocol", "Standard",
+    "FileFormat", "TableFormat",
+    "Product", "CloudService", "Company",
+    "UseCase",
 }
+CONTEXT_TYPES = {"Document", "Assessment", "RadarEntry", "Topic"}
+NODE_TYPES = ENTITY_TYPES | CONTEXT_TYPES
 
-# Node ids carry their type, so a producer that only references a node — a
-# pack pointing at tech:apache-kafka, say — can still be typechecked without
-# seeing the producer that created it. Unprefixed ids are corpus documents.
-ID_PREFIX = {
-    "tech": "Technology", "topic": "Topic", "assessment": "Assessment",
-    "radar": "RadarEntry", "concept": "Concept", "component": "Component",
-    "product": "Product", "vendor": "Vendor", "capability": "Capability",
-    "usecase": "UseCase",
-}
+# Context ids carry their type in a prefix; unprefixed ids are articles. Entity
+# ids are type-neutral ("entity:<slug>"), so reclassifying Snowflake from a
+# Technology to a Product never changes its id — an entity's type comes from
+# the registry or the pack that declares it, never from its id.
+ENTITY_PREFIX = "entity:"
+CONTEXT_PREFIX = {"assessment": "Assessment", "radar": "RadarEntry", "topic": "Topic"}
 
 
-def type_of(node_id: str) -> str:
+def is_entity_id(node_id: str) -> bool:
+    return node_id.startswith(ENTITY_PREFIX)
+
+
+def context_type_of(node_id: str) -> str | None:
+    """The type of a context id, or None for an entity id."""
+    if is_entity_id(node_id):
+        return None
     prefix, sep, _ = node_id.partition(":")
-    return ID_PREFIX.get(prefix, "Document") if sep else "Document"
+    return CONTEXT_PREFIX.get(prefix, "Document") if sep else "Document"
 
 
-# Groups the relation table is written in. A Technology and a Product are the
-# same kind of thing for most purposes — Databricks the product reads Parquet
-# exactly as Spark the project does — and the scorecards already record some
-# products as technologies, so the distinction is kept but rarely load-bearing.
-TECHY = {"Technology", "Product"}
-BUILDABLE = TECHY | {"Component"}
-ACTORS = TECHY | {"Vendor"}
-ABSTRACT = {"Concept", "Capability", "UseCase"}
-ENTITIES = BUILDABLE | ABSTRACT | {"Vendor"}
-PAGES = {"Document", "Assessment"}
+TECH_LIKE = {"Technology", "Component", "Product", "CloudService", "Language", "API",
+             "Protocol", "Standard", "FileFormat", "TableFormat"}
+# Scorecards compare patterns with tools ("Hand-rolled SQL" vs dbt), so the
+# comparison relations accept the abstract kinds too.
+COMPARABLE = TECH_LIKE | {"Concept", "ArchitecturePattern"}
 
 # relation -> (allowed source types, allowed target types)
 RELATIONS: dict[str, tuple[set[str], set[str]]] = {
-    # --- corpus -------------------------------------------------------------
-    "REFERENCES": ({"Document"}, {"Document"}),
-    "ABOUT":      ({"Document"}, {"Topic"}),
-    # An article covers a technology. Distinct from ABOUT, which points at a
-    # subject: an article can be about "olap" while covering ClickHouse.
-    "COVERS":     ({"Document"}, {"Technology"}),
-    # Curated, entity -> page, graded by how central the entity is to the page.
-    "PRIMARY_TOPIC_OF": (ENTITIES, PAGES),
-    "DISCUSSED_IN":     (ENTITIES, PAGES),
+    # --- semantic: drawn on the canvas ---------------------------------------
+    "IMPLEMENTS":        (TECH_LIKE, {"Concept", "ArchitecturePattern", "Protocol", "Standard"}),
+    "SUPPORTS":          (TECH_LIKE, {"Concept", "Protocol", "Standard", "FileFormat",
+                                      "TableFormat", "Language", "API"}),
+    "USES":              (TECH_LIKE, ENTITY_TYPES - {"UseCase", "Company"}),
+    "HAS_COMPONENT":     (TECH_LIKE, {"Component", "API"}),
+    "BASED_ON":          (TECH_LIKE, TECH_LIKE | {"Concept", "Standard"}),
+    "INCLUDED_IN":       ({"Technology", "Component"}, {"Product", "CloudService"}),
+    "READS":             (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "CloudService"}),
+    "WRITES":            (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "CloudService"}),
+    "RUNS_ON":           (TECH_LIKE, {"Technology", "Component", "Product", "CloudService"}),
+    # DEPENDS-style claims are deliberately absent: an optional integration is
+    # INTEGRATES_WITH, and a graph that confuses the two ends up claiming Spark
+    # needs Hadoop.
+    "INTEGRATES_WITH":   (TECH_LIKE, TECH_LIKE),
+    "MANAGED_BY":        ({"Technology"}, {"CloudService", "Product"}),
+    "PROVIDED_BY":       ({"Product", "CloudService", "Technology"}, {"Company"}),
+    "SUPPORTS_USE_CASE": (TECH_LIKE | {"Concept", "ArchitecturePattern"}, {"UseCase"}),
+    "ALTERNATIVE_TO":    (COMPARABLE, COMPARABLE),
+    "COMPLEMENTS":       (COMPARABLE, COMPARABLE),
+    # Mechanical, from scorecards: two options were scored on the same axes.
+    # Says nothing about which is better, or for what — ALTERNATIVE_TO does.
+    "COMPARES_TO":       (COMPARABLE, COMPARABLE),
 
-    # --- radar --------------------------------------------------------------
-    "ASSESSES":        ({"Assessment"}, {"Technology"}),
-    "COMPARES_TO":     ({"Technology"}, {"Technology"}),
-    "HAS_RADAR_ENTRY": ({"Technology"}, {"RadarEntry"}),
-    "ASSESSED_IN":     ({"RadarEntry"}, {"Assessment"}),
-    "DOCUMENTED_IN":   ({"RadarEntry"}, PAGES),
-
-    # --- structure ----------------------------------------------------------
-    "HAS_COMPONENT": (BUILDABLE, {"Component"}),
-    "EXTENDS":       (BUILDABLE, BUILDABLE),
-    "BUILT_ON":      (BUILDABLE, BUILDABLE),
-
-    # --- concepts and capabilities ------------------------------------------
-    "USES_CONCEPT":        (BUILDABLE, {"Concept"}),
-    "IMPLEMENTS_CONCEPT":  (BUILDABLE, {"Concept"}),
-    "SUPPORTS_CONCEPT":    (BUILDABLE, {"Concept"}),
-    "PROVIDES_CAPABILITY": (BUILDABLE, {"Capability"}),
-    "USED_FOR":            (BUILDABLE | {"Capability"}, {"UseCase"}),
-
-    # --- dependencies and data flow -----------------------------------------
-    # DEPENDS_ON is reserved for things that cannot be swapped out. An optional
-    # integration is INTEGRATES_WITH, and treating one as the other is how a
-    # graph ends up claiming Spark needs Hadoop.
-    "DEPENDS_ON":      (BUILDABLE, BUILDABLE),
-    "INTEGRATES_WITH": (BUILDABLE, BUILDABLE),
-    "READS":           (BUILDABLE, BUILDABLE),
-    "WRITES":          (BUILDABLE, BUILDABLE),
-    "RUNS_ON":         (BUILDABLE, TECHY),
-
-    # --- commercial ---------------------------------------------------------
-    "SUPPORTS_TECHNOLOGY": (TECHY, {"Technology"}),
-    "OFFERED_AS":          ({"Technology"}, TECHY),
-    "MANAGED_BY":          ({"Technology"}, {"Vendor"}),
-    "OWNED_BY":            (TECHY, {"Vendor"}),
-    "COMPETES_WITH":       (ACTORS, ACTORS),
-
-    # --- alternatives and lineage -------------------------------------------
-    "ALTERNATIVE_TO": (BUILDABLE, BUILDABLE),
-    "REPLACED_BY":    (BUILDABLE, BUILDABLE),
-    "EVOLVED_FROM":   (BUILDABLE | {"Concept"}, BUILDABLE | {"Concept"}),
+    # --- context: shown as links on an entity's card, never drawn ------------
+    "COVERS":           ({"Document"}, ENTITY_TYPES),
+    "PRIMARY_TOPIC_OF": (ENTITY_TYPES, {"Document", "Assessment"}),
+    "DISCUSSED_IN":     (ENTITY_TYPES, {"Document", "Assessment"}),
+    "ASSESSES":         ({"Assessment"}, COMPARABLE),
+    "HAS_RADAR_ENTRY":  (ENTITY_TYPES, {"RadarEntry"}),
+    "ASSESSED_IN":      ({"RadarEntry"}, {"Assessment"}),
+    "DOCUMENTED_IN":    ({"RadarEntry"}, {"Document", "Assessment"}),
+    "ABOUT":            ({"Document"}, {"Topic"}),
+    "REFERENCES":       ({"Document"}, {"Document"}),
 }
 
-# How the renderer should offer the relations as filters. Ordered, and part of
-# the ontology rather than the page, so a second consumer gets the same shape.
+# Relations stored in one direction and read in either. A pack may author the
+# inverse ("Concept IMPLEMENTED_BY Technology"); extraction flips it, so the
+# same fact can never be stored twice. The renderer shows the inverse label
+# when the entity in view is the target.
+INVERSE = {"IMPLEMENTED_BY": "IMPLEMENTS", "COMPONENT_OF": "HAS_COMPONENT"}
+INVERSE_LABEL = {v: k for k, v in INVERSE.items()}
+
+# Filter groups for the canvas. Context relations are not filterable edges —
+# they are the card's link sections — so they are listed separately.
 RELATION_GROUPS: dict[str, list[str]] = {
-    "Corpus": ["REFERENCES", "ABOUT", "COVERS", "PRIMARY_TOPIC_OF", "DISCUSSED_IN"],
-    "Radar": ["ASSESSES", "COMPARES_TO", "HAS_RADAR_ENTRY", "ASSESSED_IN", "DOCUMENTED_IN"],
-    "Structure": ["HAS_COMPONENT", "EXTENDS", "BUILT_ON"],
-    "Concepts": ["USES_CONCEPT", "IMPLEMENTS_CONCEPT", "SUPPORTS_CONCEPT",
-                 "PROVIDES_CAPABILITY", "USED_FOR"],
-    "Data flow": ["DEPENDS_ON", "INTEGRATES_WITH", "READS", "WRITES", "RUNS_ON"],
-    "Commercial": ["SUPPORTS_TECHNOLOGY", "OFFERED_AS", "MANAGED_BY", "OWNED_BY",
-                   "COMPETES_WITH"],
-    "Alternatives": ["ALTERNATIVE_TO", "REPLACED_BY", "EVOLVED_FROM"],
+    "Structure": ["HAS_COMPONENT", "BASED_ON", "INCLUDED_IN"],
+    "Concepts": ["IMPLEMENTS", "SUPPORTS", "USES", "SUPPORTS_USE_CASE"],
+    "Data flow": ["READS", "WRITES", "RUNS_ON", "INTEGRATES_WITH"],
+    "Commercial": ["MANAGED_BY", "PROVIDED_BY"],
+    "Alternatives": ["ALTERNATIVE_TO", "COMPLEMENTS", "COMPARES_TO"],
 }
+CONTEXT_RELATIONS = ["COVERS", "PRIMARY_TOPIC_OF", "DISCUSSED_IN", "ASSESSES", "HAS_RADAR_ENTRY",
+                     "ASSESSED_IN", "DOCUMENTED_IN", "ABOUT", "REFERENCES"]
+SEMANTIC_RELATIONS = {r for rs in RELATION_GROUPS.values() for r in rs}
 
-# An alternative with no workload attached is not a claim anyone can check.
-REQUIRES_SCOPE = {"ALTERNATIVE_TO"}
 # Undirected in meaning: store one direction, and never both.
-SYMMETRIC = {"COMPARES_TO", "INTEGRATES_WITH", "ALTERNATIVE_TO", "COMPETES_WITH"}
+SYMMETRIC = {"COMPARES_TO", "INTEGRATES_WITH", "ALTERNATIVE_TO", "COMPLEMENTS"}
 TIERS = {"deterministic", "curated", "extracted"}
-# Three values, not a free float. Nobody can defend 0.8 over 0.85 on a reviewed
-# edge, so the scale only distinguishes what a reviewer actually can.
-#   1.0   stated in the project's own documentation, or in the article cited
-#   0.75  well established, but the edge itself is a reviewer's judgement
-#   0.5   partial, version-dependent, or contested
-CONFIDENCE = {0.5, 0.75, 1.0}
 
-assert set(RELATIONS) == {r for rs in RELATION_GROUPS.values() for r in rs}, \
-    "every relation belongs to exactly one filter group"
+assert SEMANTIC_RELATIONS | set(CONTEXT_RELATIONS) == set(RELATIONS), \
+    "every relation is either a canvas filter or a card context relation"
+assert not SEMANTIC_RELATIONS & set(CONTEXT_RELATIONS)
+assert not ENTITY_TYPES & CONTEXT_TYPES
 
 
 def typecheck(rel: str, src_type: str, dst_type: str) -> bool:
@@ -148,16 +139,21 @@ def typecheck(rel: str, src_type: str, dst_type: str) -> bool:
     return src_type in allowed_src and dst_type in allowed_dst
 
 
+def canonical(rel: str, src: str, dst: str) -> tuple[str, str, str]:
+    """Flip an inverse relation into its stored direction."""
+    if rel in INVERSE:
+        return INVERSE[rel], dst, src
+    return rel, src, dst
+
+
 def validate_edge(rel: str, src_type: str, dst_type: str, *,
-                  scope: str | None = None, confidence: float | None = None) -> list[str]:
+                  confidence: float | None = None) -> list[str]:
     """Every reason a curated edge is not shippable. Empty means it is."""
     problems = []
     if rel not in RELATIONS:
         problems.append(f"unknown relation {rel}")
     elif not typecheck(rel, src_type, dst_type):
         problems.append(f"{rel} does not go from {src_type} to {dst_type}")
-    if rel in REQUIRES_SCOPE and not scope:
-        problems.append(f"{rel} needs a scope")
-    if confidence is not None and confidence not in CONFIDENCE:
-        problems.append(f"confidence {confidence} is not one of {sorted(CONFIDENCE)}")
+    if confidence is not None and not (isinstance(confidence, (int, float)) and 0 <= confidence <= 1):
+        problems.append(f"confidence {confidence!r} is not a number between 0 and 1")
     return problems

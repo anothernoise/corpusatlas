@@ -13,8 +13,8 @@ def load(path: str | Path) -> dict:
             if key in src:
                 src[key] = str((base / src[key]).resolve())
     # Every path in the config is relative to the config file, so the module
-    # stays portable — the alias table is no exception.
+    # stays portable — the entity registry is no exception.
     onto = cfg.get("ontology")
-    if onto and "aliases" in onto:
-        onto["aliases"] = str((base / onto["aliases"]).resolve())
+    if onto and "entities" in onto:
+        onto["entities"] = str((base / onto["entities"]).resolve())
     return cfg

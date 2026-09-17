@@ -41,8 +41,8 @@ and the module entry point are the same `main()`.
 
 ```toml
 [[sources]]
-type    = "html_blog"        # adapter name
-path    = "../../blog"
+type     = "html_blog"          # adapter name
+path     = "../../blog"
 url_base = "/blog/"
 
 [[sources]]
@@ -53,54 +53,70 @@ path = "../../architecture-radar/scorecards.json"
 type = "radar_entries"
 path = "../../architecture-radar/radar.json"
 
-[ontology]
-aliases = "../../knowledge-base/aliases.toml"
-```
-
-Every path resolves relative to the config file, the alias table included.
-
-The alias table maps written forms to canonical node ids. It is deliberately
-small: slugging already handles the ordinary cases, so an entry in it is an
-admission that a name is genuinely ambiguous and a human had to decide.
-
-```toml
-[[entity]]
-canonical = "tech:apache-spark"
-label     = "Apache Spark"
-tags      = ["spark"]      # this tag names a technology, not a subject
-radar     = []             # radar entry ids that name this technology
-aliases   = []             # spellings that do not slug to the canonical id
-```
-
-## Extraction tiers
-
-**Tier 1 — deterministic.** Internal links, tags, headings, frontmatter, and
-any structured data you already publish. Exact, free, and instant. This is what
-ships today.
-
-**Curated — entity packs.** One reviewed JSON file per technology: concepts,
-components, capabilities, dependencies, alternatives (always with a `scope`),
-and the pages that discuss it. Drafted offline, with a model if you like,
-then signed by a person. Nothing in the build calls a model. A pack is yielded
-as a `Document`, so every curated edge names the pack that made the claim, and
-deleting the file retracts all of it. Unsigned packs are skipped. Use
-`--include-drafts` to preview one. The curated tier runs after the
-deterministic one, and merge keeps the first writer. A pack can add links and
-aliases to an existing node, but it can never change what was hand-written.
-
-```toml
 [[sources]]
 type     = "entity_packs"
 path     = "../../knowledge-base/entities"
 url_base = "/knowledge-base/entities/"
+
+[ontology]
+entities = "../../knowledge-base/entities.toml"
 ```
 
-**Tier 2 — extraction.** NER or an LLM over prose, for relationships that are
-genuinely latent in the text. Not implemented; the seam is `extract/base.py`
-and the tier is recorded on every edge so the two never get confused.
+Every path resolves relative to the config file.
 
-Do tier 1 first and look at where the graph is thin. That gap is the spec for
-tier 2 — not the other way round.
+## Ontology
+
+Two kinds of node, and the split is the design:
+
+- **Entities** are what the graph is about. There are 14 types: `Concept`,
+  `ArchitecturePattern`, `Technology`, `Component`, `Language`, `API`,
+  `Protocol`, `Standard`, `FileFormat`, `TableFormat`, `Product`,
+  `CloudService`, `Company` and `UseCase`. Ids are type-neutral
+  (`entity:<slug>`), so reclassifying something never changes its id.
+- **Context** is where claims were published: `Document` (an article),
+  `Assessment`, `RadarEntry` and `Topic`.
+
+Semantic relations (`IMPLEMENTS`, `HAS_COMPONENT`, `READS`, `RUNS_ON`,
+`MANAGED_BY`, `ALTERNATIVE_TO`, ...) join entities. Context relations
+(`COVERS`, `HAS_RADAR_ENTRY`, `ASSESSES`, ...) join entities to their
+evidence. `corpusgraph validate` refuses a semantic edge that touches a
+context node. The artifact carries `entity_types` and `inverse_labels`, so a
+renderer never hard-codes the split.
+
+The **entity registry** (`entities.toml`) is the vocabulary. It gives each
+entity a name, type, aliases and links. It also lists the scorecard options,
+radar entries and blog tags that name the entity, so one option can name two
+entities ("Druid / Pinot"):
+
+```toml
+[[entity]]
+id      = "apache-druid"
+name    = "Apache Druid"
+type    = "Technology"
+options = ["Apache Druid", "Druid / Pinot"]
+case_sensitive = true      # text matching respects case
+```
+
+## Extraction tiers
+
+Three tiers run in order, and merge keeps the first writer. A later tier can
+add links, aliases and descriptions to an entity, but never change its label
+or type.
+
+**Deterministic.** Links, tags, scorecards and radar entries, resolved
+through the registry. Exact, free and instant.
+
+**Curated: entity packs.** One JSON file per subject: typed entities, and
+typed relationships, each with a confidence and an explanation. Packs are
+drafted offline and machine-checked. Nothing in the build calls a model. A
+pack is yielded as a `Document`, so every curated edge names its pack, and
+deleting the file retracts all of it. An ill-typed relationship, or one that
+contradicts the registry, fails the build.
+
+**Extracted: mentions.** Word-boundary matching of every entity's name and
+aliases over article text, with a minimum-occurrence bar. Companies are not
+matched. It produces `COVERS` edges tagged `extracted`. No model; the output
+is byte-identical on every run.
 
 ## Provenance
 
@@ -108,9 +124,9 @@ Every edge carries where it came from:
 
 ```json
 {
-  "src": "clickhouse", "rel": "COMPARES_TO", "dst": "starrocks",
+  "src": "entity:clickhouse", "rel": "COMPARES_TO", "dst": "entity:starrocks",
   "prov": { "doc": "starrocks-vs-clickhouse-vs-doris", "tier": "deterministic",
-            "extractor": "links@1", "at": "2026-07-20" }
+            "extractor": "deterministic@2", "via": "scorecard" }
 }
 ```
 

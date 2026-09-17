@@ -1,27 +1,56 @@
-"""The curated tier: reviewed entity packs, turned into nodes and edges.
+"""The curated tier: entity packs, turned into typed entities and relationships.
+
+A pack describes one subject in the extraction-spec format:
+
+    {"subject": {...}, "authored": {...},
+     "entities": [{"id", "name", "type", "short_description", "aliases",
+                   "canonical_url", "wikipedia_url", "wikipedia_checked",
+                   "blog_url", "related_blog_urls", "architecture_radar_url",
+                   "tags", "classification_notes"}],
+     "relationships": [{"source_id", "relationship", "target_id",
+                        "confidence", "explanation", "sources"}]}
 
 Runs after the deterministic tier. Merge is first-writer-wins, so running
-second is what guarantees a curated edge can never overwrite a hand-written
-one — ordering is the precedence mechanism, not a flag.
+second is what guarantees a pack can add to an entity the registry defines
+but never relabel or retype it — ordering is the precedence mechanism.
 
-An ill-typed edge in a pack fails the build instead of being dropped. The
-deterministic tier filters silently because its input is the whole corpus and
-a stray tag should not stop a deploy; a pack is a file a human signed, and a
-signed claim that cannot be stored is a mistake someone needs to hear about.
+An ill-typed or undeclared relationship fails the build instead of being
+dropped. The deterministic tier filters silently because its input is the
+whole corpus; a pack is a file someone wrote on purpose, and a claim in it
+that cannot be stored is a mistake someone needs to hear about.
 """
 from __future__ import annotations
 
+import re
+
 from ..model import Document, Edge, Node
-from ..ontology import type_of, validate_edge
+from ..ontology import SEMANTIC_RELATIONS, SYMMETRIC, canonical, validate_edge
+from ..resolve import Resolver, entity_id
+
+_BLOG = re.compile(r"^(?:https://shirokoff\.ca)?/blog/([a-z0-9-]+)/?$")
+_RADAR = re.compile(r"^(?:https://shirokoff\.ca)?/architecture-radar/([a-z0-9-]+)/?$")
 
 
 class PackError(ValueError):
     pass
 
 
+def blog_doc_id(url: str | None) -> str | None:
+    m = _BLOG.match(url or "")
+    return m.group(1) if m else None
+
+
+def radar_doc_id(url: str | None) -> str | None:
+    m = _RADAR.match(url or "")
+    return f"assessment:{m.group(1)}" if m else None
+
+
 class PacksExtractor:
-    name = "packs@1"
+    name = "packs@2"
     tier = "curated"
+
+    def __init__(self, resolver: Resolver | None = None):
+        self.resolver = resolver or Resolver()
 
     def run(self, docs: list[Document]):
         nodes: list[Node] = []
@@ -31,36 +60,67 @@ class PacksExtractor:
                 continue
             pack = d.meta["pack"]
             prov = {"doc": d.id, "tier": self.tier, "extractor": self.name}
+            declared: dict[str, str] = {}
 
-            for n in pack.get("nodes", []):
-                if type_of(n["id"]) != n["type"]:
-                    raise PackError(f"{d.id}: node {n['id']} declared {n['type']}, "
-                                    f"but its id says {type_of(n['id'])}")
-                urls = n.get("urls") or {}
-                corpus = list(urls.get("corpus") or [])
-                ext = urls.get("external") or {}
+            for e in pack.get("entities", []):
+                eid = entity_id(e["id"])
+                registered = self.resolver.type(eid)
+                if registered and registered != e["type"]:
+                    raise PackError(f"{d.id}: {e['id']} is a {registered} in the registry, "
+                                    f"but the pack declares {e['type']}")
+                declared[eid] = e["type"]
                 # Re-serialised field by field, never passed through: a key
                 # reordered in a hand-edited pack must not rewrite the artifact.
-                out_urls = {k: v for k, v in (("wikipedia", ext.get("wikipedia")),
-                                              ("docs", ext.get("docs")),
-                                              ("corpus", corpus)) if v}
-                nodes.append(Node(
-                    id=n["id"], label=n["label"], type=n["type"],
-                    url=corpus[0] if corpus else (ext.get("wikipedia") or ext.get("docs")),
-                    aliases=tuple(n.get("aliases") or ()),
-                    urls=out_urls,
-                ))
+                urls = {k: v for k, v in (("wikipedia", e.get("wikipedia_url")),
+                                          ("canonical", e.get("canonical_url"))) if v}
+                meta = {k: v for k, v in (("description", e.get("short_description")),
+                                          ("notes", e.get("classification_notes"))) if v}
+                nodes.append(Node(id=eid, label=e["name"], type=e["type"],
+                                  aliases=tuple(e.get("aliases") or ()), urls=urls, meta=meta))
 
-            for e in pack.get("edges", []):
-                problems = validate_edge(e["rel"], type_of(e["src"]), type_of(e["dst"]),
-                                         scope=e.get("scope"), confidence=e.get("confidence"))
+                page = dict(prov, via="pack-url")
+                if blog_doc_id(e.get("blog_url")):
+                    edges.append(Edge(eid, "PRIMARY_TOPIC_OF", blog_doc_id(e["blog_url"]), dict(page)))
+                for u in e.get("related_blog_urls") or ():
+                    if blog_doc_id(u):
+                        edges.append(Edge(eid, "DISCUSSED_IN", blog_doc_id(u), dict(page)))
+                if radar_doc_id(e.get("architecture_radar_url")):
+                    edges.append(Edge(eid, "DISCUSSED_IN", radar_doc_id(e["architecture_radar_url"]),
+                                      dict(page)))
+
+            seen: set[tuple] = set()
+            for rel_spec in pack.get("relationships", []):
+                raw = (rel_spec["source_id"], rel_spec["relationship"], rel_spec["target_id"])
+                rel, src, dst = canonical(rel_spec["relationship"],
+                                          entity_id(rel_spec["source_id"]),
+                                          entity_id(rel_spec["target_id"]))
+                where = f"{d.id}: {raw[0]} -{raw[1]}-> {raw[2]}"
+                if rel not in SEMANTIC_RELATIONS:
+                    raise PackError(f"{where}: {rel} is not a semantic relation")
+                types = []
+                for end in (src, dst):
+                    t = declared.get(end) or self.resolver.type(end)
+                    if not t:
+                        raise PackError(f"{where}: {end} is declared neither in the pack "
+                                        f"nor in the entity registry")
+                    types.append(t)
+                problems = validate_edge(rel, *types, confidence=rel_spec.get("confidence"))
+                if rel_spec.get("confidence") is None:
+                    problems.append("confidence is required")
+                if not rel_spec.get("explanation"):
+                    problems.append("explanation is required")
                 if problems:
-                    raise PackError(f"{d.id}: {e['src']} -{e['rel']}-> {e['dst']}: "
-                                    + "; ".join(problems))
+                    raise PackError(f"{where}: " + "; ".join(problems))
+                if rel in SYMMETRIC:
+                    src, dst = sorted((src, dst))
+                if (src, rel, dst) in seen:
+                    continue
+                seen.add((src, rel, dst))
                 edges.append(Edge(
-                    e["src"], e["rel"], e["dst"], dict(prov),
-                    scope=e.get("scope") or None,
-                    confidence=e.get("confidence"),
-                    sources=tuple(s["url"] for s in e.get("sources") or ()),
+                    src, rel, dst, dict(prov),
+                    scope=rel_spec.get("scope") or None,
+                    confidence=rel_spec["confidence"],
+                    sources=tuple(s["url"] if isinstance(s, dict) else s
+                                  for s in rel_spec.get("sources") or ()),
                 ))
         return nodes, edges

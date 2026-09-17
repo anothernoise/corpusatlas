@@ -1,8 +1,9 @@
 """Adapter for curated entity packs.
 
-A pack is a reviewed JSON file describing one technology: its concepts,
-components, capabilities, alternatives and the pages that discuss it. Drafted
-offline with a model, corrected and signed by a human, committed as a file.
+A pack is a JSON file describing one subject — its entities and the typed
+relationships between them — in the extraction-spec format. Packs are drafted
+offline, and every link and citation in them is machine-checked by
+knowledge-base/validate_packs.py before a build.
 
 Each pack is yielded as a Document. That is the whole trick: retraction,
 provenance and the "every edge names its document" rule all key on document
@@ -18,30 +19,21 @@ from ..model import Document
 
 
 class EntityPacksAdapter:
-    def __init__(self, path: str, url_base: str = "", include_drafts: bool = False):
+    def __init__(self, path: str, url_base: str = ""):
         self.path = Path(path)
         self.url_base = url_base
-        # A pack nobody has signed is a model's draft, and the whole point of
-        # this tier is that a person stands behind every claim in it. Drafts
-        # stay out of the published graph unless explicitly asked for, which
-        # is what a local preview of an unreviewed pack does.
-        self.include_drafts = include_drafts
 
     def documents(self):
         for f in sorted(self.path.glob("*.json")):
             if f.name.endswith(".schema.json"):
                 continue
             pack = json.loads(f.read_text(encoding="utf-8"))
-            authored = pack.get("authored", {})
-            signed = bool(authored.get("reviewed") and authored.get("reviewed_by"))
-            if not signed and not self.include_drafts:
-                continue
-            target = pack.get("target", {})
+            subject = pack.get("subject", {})
             yield Document(
                 id=f"pack:{f.stem}",
-                title=f"Entity pack: {target.get('label', f.stem)}",
+                title=f"Entity pack: {subject.get('name', f.stem)}",
                 url=f"{self.url_base}{f.name}",
                 kind="entity-pack",
-                date=authored.get("reviewed"),
+                date=(pack.get("authored") or {}).get("drafted"),
                 meta={"pack": pack},
             )

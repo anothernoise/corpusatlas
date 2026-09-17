@@ -11,10 +11,22 @@ from dataclasses import replace
 
 from .model import Edge, Node  # noqa: F401
 
-# Fields a later producer may fill in when the first writer left them empty.
-# Never label, type or meta: those are the first writer's, and extractors run
-# in precedence order precisely so that hand-written data wins.
-ENRICHABLE = ("url", "aliases", "urls")
+def _enrich(first: Node, later: Node) -> Node:
+    """Fill what the first writer left empty. Never label or type: those are
+    the first writer's, and extractors run in precedence order precisely so
+    that hand-written data wins. Dict fields gain missing keys only; aliases
+    gain missing spellings."""
+    fill = {}
+    if not first.url and later.url:
+        fill["url"] = later.url
+    for f in ("urls", "meta"):
+        merged = {**getattr(later, f), **getattr(first, f)}
+        if merged != getattr(first, f):
+            fill[f] = merged
+    extra = tuple(a for a in later.aliases if a not in first.aliases)
+    if extra:
+        fill["aliases"] = first.aliases + extra
+    return replace(first, **fill) if fill else first
 
 
 def merge(node_sets, edge_sets, live_doc_ids: set[str]):
@@ -25,10 +37,7 @@ def merge(node_sets, edge_sets, live_doc_ids: set[str]):
             if first is None:
                 nodes[n.id] = n
             elif first.type == n.type:
-                fill = {f: getattr(n, f) for f in ENRICHABLE
-                        if not getattr(first, f) and getattr(n, f)}
-                if fill:
-                    nodes[n.id] = replace(first, **fill)
+                nodes[n.id] = _enrich(first, n)
 
     seen: dict[tuple, Edge] = {}
     for group in edge_sets:
