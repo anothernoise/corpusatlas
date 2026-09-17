@@ -122,5 +122,6 @@ class PacksExtractor:
                     confidence=rel_spec["confidence"],
                     sources=tuple(s["url"] if isinstance(s, dict) else s
                                   for s in rel_spec.get("sources") or ()),
+                    explanation=rel_spec["explanation"],
                 ))
         return nodes, edges

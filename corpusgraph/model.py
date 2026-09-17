@@ -52,6 +52,8 @@ class Edge:
     # Evidence for the claim, as URLs. prov["doc"] is who made the claim;
     # sources are what it rests on. They are different questions.
     sources: tuple[str, ...] = ()
+    # Why the claim holds, in a sentence — shown on the edge card.
+    explanation: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -65,5 +67,5 @@ class Edge:
         # as it did before scope and confidence existed.
         d = {"src": self.src, "rel": self.rel, "dst": self.dst,
              "scope": self.scope, "confidence": self.confidence,
-             "sources": list(self.sources), "prov": self.prov}
+             "sources": list(self.sources), "explanation": self.explanation, "prov": self.prov}
         return {k: v for k, v in d.items() if v not in _EMPTY}
