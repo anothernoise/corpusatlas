@@ -9,7 +9,7 @@ from pathlib import Path
 from . import config as cfgmod
 from .adapters import build as build_adapter
 from .emit import write_graph
-from .extract import DeterministicExtractor, PacksExtractor
+from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
 from .merge import merge
 from .ontology import NODE_TYPES, TIERS
 from .resolve import Resolver
@@ -32,17 +32,27 @@ def cmd_build(args) -> int:
         return 1
 
     resolver = Resolver.from_config(cfg)
-    # Order is precedence: merge keeps the first writer of any node or edge, so
-    # the deterministic tier runs first and curated claims only fill gaps.
-    extractors = [DeterministicExtractor(resolver=resolver), PacksExtractor()]
-    node_sets, edge_sets = [], []
-    for ex in extractors:
-        n, e = ex.run(docs)
-        n, e = list(n), list(e)
-        node_sets.append(n)
-        edge_sets.append(e)
-        print(f"  {ex.name:<20} {len(n):>4} nodes, {len(e)} edges")
+    # Order is precedence: merge keeps the first writer of any node or edge.
+    # Deterministic runs first, packs second (a curated claim beats an
+    # independent re-derivation of the same fact), and the mentions scanner
+    # runs last, over the vocabulary the first two tiers just produced — so
+    # it can only ADD reach, never relabel or override a hand-written or
+    # reviewed claim. Sequential, not a uniform loop, because mentions needs
+    # to see what the earlier tiers named before it can search for it.
+    det = DeterministicExtractor(resolver=resolver)
+    det_nodes, det_edges = (list(x) for x in det.run(docs))
+    packs = PacksExtractor()
+    pack_nodes, pack_edges = (list(x) for x in packs.run(docs))
+    mentions = MentionsExtractor(det_nodes + pack_nodes)
+    ment_nodes, ment_edges = (list(x) for x in mentions.run(docs))
 
+    for ex_name, n, e in ((det.name, det_nodes, det_edges),
+                          (packs.name, pack_nodes, pack_edges),
+                          (mentions.name, ment_nodes, ment_edges)):
+        print(f"  {ex_name:<20} {len(n):>4} nodes, {len(e)} edges")
+
+    node_sets = [det_nodes, pack_nodes, ment_nodes]
+    edge_sets = [det_edges, pack_edges, ment_edges]
     nodes, edges = merge(node_sets, edge_sets, live_doc_ids={d.id for d in docs})
     counts = write_graph(Path(args.out), nodes, edges, sources=sources)
     print(f"\nwrote {args.out}: {counts['nodes']} nodes, {counts['edges']} edges")

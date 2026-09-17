@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from corpusgraph.adapters.entity_packs import EntityPacksAdapter
 from corpusgraph.emit import write_graph
-from corpusgraph.extract import DeterministicExtractor, PackError, PacksExtractor
+from corpusgraph.extract import DeterministicExtractor, MentionsExtractor, PackError, PacksExtractor
 from corpusgraph.merge import merge
 from corpusgraph.model import Document, Edge, Node
 from corpusgraph.ontology import typecheck
@@ -288,3 +288,85 @@ def test_the_artifact_is_byte_identical_across_builds():
         write_graph(a, nodes, edges, sources=["x"])
         write_graph(b, dict(reversed(list(nodes.items()))), list(reversed(edges)), sources=["x"])
         assert a.read_bytes() == b.read_bytes()
+
+
+# --- the extracted tier: deterministic mention-matching over article text ----
+
+def mention_docs(body):
+    return [
+        Document(id="m", title="M", url="/blog/m", kind="article", text=body),
+    ]
+
+
+def test_mentions_finds_a_technology_never_tagged():
+    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology")]
+    body = "Apache Spark schedules a DAG of stages. " * 2
+    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
+    assert ("m", "COVERS", "tech:apache-spark") in {(e.src, e.rel, e.dst) for e in edges}
+    assert edges[0].prov["tier"] == "extracted"
+
+
+def test_mentions_requires_more_than_one_hit_for_a_short_form():
+    vocab = [Node(id="tech:apache-kafka", label="Kafka", type="Technology")]
+    body = "Kafka is mentioned exactly once here and never again."
+    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
+    assert not edges, "a single passing mention of a short form must not become a claim"
+
+
+def test_mentions_never_matches_a_substring_of_another_word():
+    # "Spark" must not fire on "SparkNotes" or "sparking".
+    vocab = [Node(id="tech:apache-spark", label="Spark", type="Technology")]
+    body = "SparkNotes is unrelated, and sparking plugs are unrelated too. " * 2
+    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
+    assert not edges
+
+
+def test_mentions_finds_a_curated_concept_via_its_parenthetical_alias():
+    # "Resilient distributed dataset (RDD)" should also match on "RDD" alone,
+    # and on the label with the parenthetical stripped — both derived from
+    # what a human already wrote, never guessed.
+    vocab = [Node(id="concept:rdd", label="Resilient distributed dataset (RDD)", type="Concept")]
+    body = "An RDD is immutable. RDDs recompute lost partitions from lineage."
+    _, edges = MentionsExtractor(vocab).run(mention_docs(body))
+    rels = {(e.src, e.rel, e.dst) for e in edges}
+    assert ("concept:rdd", "DISCUSSED_IN", "m") in rels
+
+
+def test_mentions_ignores_non_article_kinds():
+    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology")]
+    docs = [Document(id="assessment:x", title="X", url="/architecture-radar/x",
+                     kind="assessment", text="Apache Spark Apache Spark Apache Spark")]
+    _, edges = MentionsExtractor(vocab).run(docs)
+    assert not edges
+
+
+def test_mentions_never_overrides_an_existing_tag_based_claim():
+    # Same (src, rel, dst) as a deterministic COVERS edge merge() already
+    # keeps — the extracted duplicate must be superseded, not conflict. The
+    # assessment is what gives tech:apache-spark a real Technology node;
+    # without one, DeterministicExtractor's own typecheck would already
+    # drop the tag-based edge before mentions ever runs.
+    ds = [
+        Document(id="a", title="A", url="/blog/a", kind="article", tags=("spark",),
+                 text="Apache Spark Apache Spark Apache Spark"),
+        Document(id="assessment:x", title="X", url="/architecture-radar/x", kind="assessment",
+                 meta={"platforms": ["Apache Spark"]}),
+    ]
+    resolver = Resolver([{"canonical": "tech:apache-spark", "label": "Apache Spark", "tags": ["spark"]}])
+    det = DeterministicExtractor(resolver=resolver)
+    det_nodes, det_edges = (list(x) for x in det.run(ds))
+    ment_nodes, ment_edges = (list(x) for x in MentionsExtractor(det_nodes).run(ds))
+    nodes, edges = merge([det_nodes, ment_nodes], [det_edges, ment_edges],
+                         live_doc_ids={d.id for d in ds})
+    covers = [e for e in edges if e.rel == "COVERS" and e.src == "a" and e.dst == "tech:apache-spark"]
+    assert len(covers) == 1 and covers[0].prov["tier"] == "deterministic"
+
+
+def test_mentions_output_is_idempotent():
+    vocab = [Node(id="tech:apache-spark", label="Apache Spark", type="Technology"),
+             Node(id="concept:shuffle", label="Shuffle", type="Concept")]
+    body = "Apache Spark's shuffle moves data across the network. Shuffle is costly."
+    ex = MentionsExtractor(vocab)
+    _, e1 = ex.run(mention_docs(body))
+    _, e2 = ex.run(mention_docs(body))
+    assert {e.key for e in e1} == {e.key for e in e2} and len(e1) == len(e2)
