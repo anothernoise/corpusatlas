@@ -16,5 +16,12 @@ path = "../../architecture-radar/scorecards.json"
 type = "radar_entries"
 path = "../../architecture-radar/radar.json"
 
+# Curated entity packs: model-drafted, human-reviewed, one file per technology.
+# Unsigned packs are skipped; see knowledge-base/entities/AUTHORING.md.
+[[sources]]
+type     = "entity_packs"
+path     = "../../knowledge-base/entities"
+url_base = "/knowledge-base/entities/"
+
 [ontology]
 aliases = "../../knowledge-base/aliases.toml"

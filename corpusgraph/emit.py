@@ -5,6 +5,8 @@ import json
 from datetime import date
 from pathlib import Path
 
+from .ontology import RELATION_GROUPS
+
 
 def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str]) -> dict:
     degree: dict[str, int] = {}
@@ -12,11 +14,17 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str]) -> 
         degree[e.src] = degree.get(e.src, 0) + 1
         degree[e.dst] = degree.get(e.dst, 0) + 1
 
+    present = {e.rel for e in edges}
     payload = {
         "generated": date.today().isoformat(),
-        "generator": "corpusgraph 0.1.0",
+        "generator": "corpusgraph 0.2.0",
         "sources": sources,
         "counts": {"nodes": len(nodes), "edges": len(edges)},
+        # Only groups with something in them, so a reader never sees a filter
+        # for a relation this graph does not contain.
+        "relation_groups": {g: [r for r in rels if r in present]
+                            for g, rels in RELATION_GROUPS.items()
+                            if any(r in present for r in rels)},
         "nodes": [dict(n.to_json(), degree=degree.get(n.id, 0))
                   for n in sorted(nodes.values(), key=lambda n: n.id)],
         "edges": [e.to_json() for e in sorted(edges, key=lambda e: e.key)],

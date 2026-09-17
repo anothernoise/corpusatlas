@@ -1,12 +1,16 @@
 """Tests for the invariants that actually matter."""
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from corpusgraph.model import Document, Edge, Node
-from corpusgraph.extract import DeterministicExtractor
+from corpusgraph.adapters.entity_packs import EntityPacksAdapter
+from corpusgraph.emit import write_graph
+from corpusgraph.extract import DeterministicExtractor, PackError, PacksExtractor
 from corpusgraph.merge import merge
+from corpusgraph.model import Document, Edge, Node
 from corpusgraph.ontology import typecheck
 from corpusgraph.resolve import Resolver
 
@@ -179,3 +183,108 @@ def test_resolution_falls_back_to_slugging_but_never_guesses():
     # Tags and radar entries are table-only: without an entry, no claim.
     assert bare.resolve("spark", "tag") is None
     assert bare.resolve("duckdb", "radar") is None
+
+
+# --- the curated tier: signed packs, never overwriting what was hand-written ---
+
+def pack_doc(doc_id="pack:spark", edges=None, nodes=None):
+    return Document(id=doc_id, title="pack", url="/p", kind="entity-pack", meta={"pack": {
+        "nodes": nodes if nodes is not None else [
+            {"id": "tech:apache-spark", "type": "Technology", "label": "Spark (pack label)",
+             "urls": {"external": {"wikipedia": "https://en.wikipedia.org/wiki/Apache_Spark"}}},
+            {"id": "concept:lazy-evaluation", "type": "Concept", "label": "Lazy evaluation"},
+        ],
+        "edges": edges if edges is not None else [
+            {"src": "tech:apache-spark", "rel": "USES_CONCEPT", "dst": "concept:lazy-evaluation",
+             "confidence": 1.0, "sources": [{"type": "corpus", "url": "/blog/a"}]},
+        ],
+    }})
+
+
+def build_curated(extra_docs=(), live=None):
+    ds = radar_docs() + list(extra_docs)
+    det = DeterministicExtractor(resolver=Resolver(ALIASES))
+    n1, e1 = [list(x) for x in det.run(ds)]
+    n2, e2 = [list(x) for x in PacksExtractor().run(ds)]
+    return merge([n1, n2], [e1, e2], live_doc_ids=live if live is not None else {d.id for d in ds})
+
+
+def test_scope_is_part_of_edge_identity():
+    a = Edge("tech:x", "ALTERNATIVE_TO", "tech:y", {"doc": "p"}, scope="streaming")
+    b = Edge("tech:x", "ALTERNATIVE_TO", "tech:y", {"doc": "p"}, scope="batch")
+    _, edges = merge([[Node("tech:x", "X", "Technology"), Node("tech:y", "Y", "Technology")]],
+                     [[a, b]], live_doc_ids={"p"})
+    assert len(edges) == 2, "two scopes are two claims; dedupe must not merge them"
+
+
+def test_a_plain_edge_serialises_exactly_as_before():
+    e = Edge("a", "REFERENCES", "b", {"doc": "a", "tier": "deterministic"})
+    assert e.to_json() == {"src": "a", "rel": "REFERENCES", "dst": "b",
+                           "prov": {"doc": "a", "tier": "deterministic"}}
+
+
+def test_curated_edges_carry_the_curated_tier_and_the_pack_as_document():
+    _, edges = build_curated([pack_doc()])
+    curated = [e for e in edges if e.rel == "USES_CONCEPT"]
+    assert curated and all(e.prov["tier"] == "curated" and e.prov["doc"] == "pack:spark"
+                           for e in curated)
+    assert all(e.prov["tier"] == "deterministic" for e in edges if e.rel != "USES_CONCEPT")
+
+
+def test_a_pack_enriches_an_existing_node_but_never_relabels_it():
+    nodes, _ = build_curated([pack_doc()])
+    spark = nodes["tech:apache-spark"]
+    assert spark.label == "Apache Spark"                  # the scorecard's, not the pack's
+    assert spark.urls["wikipedia"].endswith("/Apache_Spark")
+
+
+def test_deleting_a_pack_retracts_exactly_its_claims():
+    ds = radar_docs() + [pack_doc()]
+    live = {d.id for d in ds} - {"pack:spark"}
+    nodes, edges = build_curated([pack_doc()], live=live)
+    assert not [e for e in edges if e.prov.get("doc") == "pack:spark"]
+    assert "concept:lazy-evaluation" not in nodes          # nothing else held it up
+    assert ("tech:apache-spark", "HAS_RADAR_ENTRY", "radar:apache-spark") in \
+        {(e.src, e.rel, e.dst) for e in edges}             # deterministic claims untouched
+
+
+def test_an_ill_typed_curated_edge_fails_the_build():
+    bad = pack_doc(edges=[{"src": "concept:lazy-evaluation", "rel": "HAS_COMPONENT",
+                           "dst": "tech:apache-spark", "confidence": 1.0, "sources": []}])
+    try:
+        PacksExtractor().run([bad])
+    except PackError:
+        return
+    raise AssertionError("an ill-typed signed claim must not be dropped silently")
+
+
+def test_an_alternative_without_scope_fails_the_build():
+    bad = pack_doc(edges=[{"src": "tech:apache-spark", "rel": "ALTERNATIVE_TO",
+                           "dst": "tech:apache-flink", "confidence": 1.0, "sources": []}])
+    try:
+        PacksExtractor().run([bad])
+    except PackError:
+        return
+    raise AssertionError("ALTERNATIVE_TO without a scope is a slogan, not a claim")
+
+
+def test_unsigned_packs_are_not_published():
+    with tempfile.TemporaryDirectory() as d:
+        for name, reviewed in (("signed", "2026-09-16"), ("draft", None)):
+            (Path(d) / f"{name}.json").write_text(json.dumps({
+                "target": {"id": "tech:x", "label": name, "type": "Technology"},
+                "authored": {"reviewed": reviewed, "reviewed_by": reviewed and "a person"},
+                "nodes": [], "edges": []}))
+        (Path(d) / "pack.schema.json").write_text("{}")
+        assert [x.id for x in EntityPacksAdapter(d).documents()] == ["pack:signed"]
+        assert [x.id for x in EntityPacksAdapter(d, include_drafts=True).documents()] == \
+            ["pack:draft", "pack:signed"]
+
+
+def test_the_artifact_is_byte_identical_across_builds():
+    nodes, edges = build_curated([pack_doc()])
+    with tempfile.TemporaryDirectory() as d:
+        a, b = Path(d) / "a.json", Path(d) / "b.json"
+        write_graph(a, nodes, edges, sources=["x"])
+        write_graph(b, dict(reversed(list(nodes.items()))), list(reversed(edges)), sources=["x"])
+        assert a.read_bytes() == b.read_bytes()

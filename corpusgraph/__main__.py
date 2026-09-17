@@ -9,9 +9,9 @@ from pathlib import Path
 from . import config as cfgmod
 from .adapters import build as build_adapter
 from .emit import write_graph
-from .extract import DeterministicExtractor
+from .extract import DeterministicExtractor, PacksExtractor
 from .merge import merge
-from .ontology import NODE_TYPES
+from .ontology import NODE_TYPES, TIERS
 from .resolve import Resolver
 
 
@@ -19,6 +19,8 @@ def cmd_build(args) -> int:
     cfg = cfgmod.load(args.config)
     docs, sources = [], []
     for spec in cfg.get("sources", []):
+        if args.include_drafts and spec.get("type") == "entity_packs":
+            spec = dict(spec, include_drafts=True)
         adapter = build_adapter(spec)
         got = list(adapter.documents())
         docs.extend(got)
@@ -30,7 +32,9 @@ def cmd_build(args) -> int:
         return 1
 
     resolver = Resolver.from_config(cfg)
-    extractors = [DeterministicExtractor(resolver=resolver)]
+    # Order is precedence: merge keeps the first writer of any node or edge, so
+    # the deterministic tier runs first and curated claims only fill gaps.
+    extractors = [DeterministicExtractor(resolver=resolver), PacksExtractor()]
     node_sets, edge_sets = [], []
     for ex in extractors:
         n, e = ex.run(docs)
@@ -92,8 +96,8 @@ def cmd_validate(args) -> int:
             errs.append(f"edge without provenance: {e['src']}-{e['rel']}->{e['dst']}")
         # The tier is what keeps a hand-written edge from ever being mistaken
         # for an inferred one, so an edge without it is not shippable.
-        if not e.get("prov", {}).get("tier"):
-            errs.append(f"edge without a tier: {e['src']}-{e['rel']}->{e['dst']}")
+        if e.get("prov", {}).get("tier") not in TIERS:
+            errs.append(f"edge without a known tier: {e['src']}-{e['rel']}->{e['dst']}")
     if g["counts"]["nodes"] != len(g["nodes"]) or g["counts"]["edges"] != len(g["edges"]):
         errs.append("counts header disagrees with the payload")
     isolated = ids - ({e["src"] for e in g["edges"]} | {e["dst"] for e in g["edges"]})
@@ -113,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("build", help="build the graph from a config")
     b.add_argument("--config", default="corpusgraph.toml")
     b.add_argument("--out", required=True)
+    b.add_argument("--include-drafts", action="store_true",
+                   help="include unsigned entity packs (local preview only; never in CI)")
     b.set_defaults(fn=cmd_build)
 
     s = sub.add_parser("stats", help="summarise a built graph")

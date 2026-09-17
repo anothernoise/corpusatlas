@@ -38,6 +38,10 @@ class DeterministicExtractor:
             nodes.setdefault(node.id, node)
             types[node.id] = node.type
 
+        # Packs belong to the curated tier. Letting them through here would turn
+        # every pack file into a spurious Document node.
+        docs = [d for d in docs if d.kind != "entity-pack"]
+
         for d in docs:
             ntype = NODE_KIND.get(d.kind, "Document")
             if ntype == "RadarEntry":

@@ -18,7 +18,7 @@ Two rules keep this a module rather than a framework:
    process, serves no requests, and has no opinion about what reads the output.
 
 ```
-adapters → extract (deterministic) → resolve → merge → graph.json
+adapters → resolve → extract (deterministic, then curated) → merge → graph.json
 ```
 
 ## Install and run
@@ -27,7 +27,7 @@ No third-party dependencies. Python 3.11+.
 
 ```bash
 pip install -e .          # installs the `corpusgraph` console script
-python tests/run.py       # 8 invariant tests, stdlib only
+python tests/run.py       # invariant tests, stdlib only
 
 corpusgraph build --config corpusgraph.toml --out graph.json
 corpusgraph stats    --graph graph.json
@@ -77,6 +77,23 @@ aliases   = []             # spellings that do not slug to the canonical id
 **Tier 1 — deterministic.** Internal links, tags, headings, frontmatter, and
 any structured data you already publish. Exact, free, and instant. This is what
 ships today.
+
+**Curated — entity packs.** One reviewed JSON file per technology: concepts,
+components, capabilities, dependencies, alternatives (always with a `scope`),
+and the pages that discuss it. Drafted offline, with a model if you like,
+then signed by a person. Nothing in the build calls a model. A pack is yielded
+as a `Document`, so every curated edge names the pack that made the claim, and
+deleting the file retracts all of it. Unsigned packs are skipped. Use
+`--include-drafts` to preview one. The curated tier runs after the
+deterministic one, and merge keeps the first writer. A pack can add links and
+aliases to an existing node, but it can never change what was hand-written.
+
+```toml
+[[sources]]
+type     = "entity_packs"
+path     = "../../knowledge-base/entities"
+url_base = "/knowledge-base/entities/"
+```
 
 **Tier 2 — extraction.** NER or an LLM over prose, for relationships that are
 genuinely latent in the text. Not implemented; the seam is `extract/base.py`
