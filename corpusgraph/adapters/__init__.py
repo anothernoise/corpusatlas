@@ -1,9 +1,11 @@
 """Source adapters. Each yields Documents and knows nothing about the graph."""
 from .html_blog import HtmlBlogAdapter
+from .radar_entries import RadarEntriesAdapter
 from .radar_scorecards import RadarScorecardsAdapter
 
 REGISTRY = {
     "html_blog": HtmlBlogAdapter,
+    "radar_entries": RadarEntriesAdapter,
     "radar_scorecards": RadarScorecardsAdapter,
 }
 

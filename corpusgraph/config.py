@@ -12,4 +12,9 @@ def load(path: str | Path) -> dict:
         for key in ("path", "index"):
             if key in src:
                 src[key] = str((base / src[key]).resolve())
+    # Every path in the config is relative to the config file, so the module
+    # stays portable — the alias table is no exception.
+    onto = cfg.get("ontology")
+    if onto and "aliases" in onto:
+        onto["aliases"] = str((base / onto["aliases"]).resolve())
     return cfg

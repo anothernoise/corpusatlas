@@ -9,3 +9,12 @@ url_base = "/blog/"
 [[sources]]
 type = "radar_scorecards"
 path = "../../architecture-radar/scorecards.json"
+
+# The scores live in scorecards.json; the dated calls live here — which ring an
+# entry sits in, in which edition, and every move between rings.
+[[sources]]
+type = "radar_entries"
+path = "../../architecture-radar/radar.json"
+
+[ontology]
+aliases = "../../knowledge-base/aliases.toml"

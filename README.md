@@ -49,8 +49,27 @@ url_base = "/blog/"
 type = "radar_scorecards"
 path = "../../architecture-radar/scorecards.json"
 
+[[sources]]
+type = "radar_entries"
+path = "../../architecture-radar/radar.json"
+
 [ontology]
-aliases = "aliases.yaml"
+aliases = "../../knowledge-base/aliases.toml"
+```
+
+Every path resolves relative to the config file, the alias table included.
+
+The alias table maps written forms to canonical node ids. It is deliberately
+small: slugging already handles the ordinary cases, so an entry in it is an
+admission that a name is genuinely ambiguous and a human had to decide.
+
+```toml
+[[entity]]
+canonical = "tech:apache-spark"
+label     = "Apache Spark"
+tags      = ["spark"]      # this tag names a technology, not a subject
+radar     = []             # radar entry ids that name this technology
+aliases   = []             # spellings that do not slug to the canonical id
 ```
 
 ## Extraction tiers

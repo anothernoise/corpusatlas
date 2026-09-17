@@ -11,6 +11,8 @@ from .adapters import build as build_adapter
 from .emit import write_graph
 from .extract import DeterministicExtractor
 from .merge import merge
+from .ontology import NODE_TYPES
+from .resolve import Resolver
 
 
 def cmd_build(args) -> int:
@@ -27,7 +29,8 @@ def cmd_build(args) -> int:
         print("no documents found — check the paths in your config", file=sys.stderr)
         return 1
 
-    extractors = [DeterministicExtractor()]
+    resolver = Resolver.from_config(cfg)
+    extractors = [DeterministicExtractor(resolver=resolver)]
     node_sets, edge_sets = [], []
     for ex in extractors:
         n, e = ex.run(docs)
@@ -74,6 +77,12 @@ def cmd_validate(args) -> int:
 
     if len(ids) != len(g["nodes"]):
         errs.append("duplicate node ids")
+    # The ontology is only closed if something checks it on the way out. A node
+    # type nothing recognises means a producer invented one, and the renderer
+    # would draw it in the fallback grey rather than fail.
+    for n in g["nodes"]:
+        if n["type"] not in NODE_TYPES:
+            errs.append(f"unknown node type {n['type']!r} on {n['id']}")
     for e in g["edges"]:
         if e["src"] not in ids:
             errs.append(f"dangling src {e['src']}")
@@ -81,6 +90,10 @@ def cmd_validate(args) -> int:
             errs.append(f"dangling dst {e['dst']}")
         if not e.get("prov", {}).get("doc"):
             errs.append(f"edge without provenance: {e['src']}-{e['rel']}->{e['dst']}")
+        # The tier is what keeps a hand-written edge from ever being mistaken
+        # for an inferred one, so an edge without it is not shippable.
+        if not e.get("prov", {}).get("tier"):
+            errs.append(f"edge without a tier: {e['src']}-{e['rel']}->{e['dst']}")
     if g["counts"]["nodes"] != len(g["nodes"]) or g["counts"]["edges"] != len(g["edges"]):
         errs.append("counts header disagrees with the payload")
     isolated = ids - ({e["src"] for e in g["edges"]} | {e["dst"] for e in g["edges"]})
