@@ -119,6 +119,15 @@ def test_ontology_rejects_ill_typed_triples():
     assert not typecheck("INVENTED", "Technology", "Concept")      # unknown relation
 
 
+def test_reads_and_writes_accept_a_component_target():
+    # A storage subsystem (HDFS, a Component of Hadoop) is exactly the kind
+    # of thing another technology reads and writes — the same reasoning
+    # RUNS_ON already applies to a Component cluster manager.
+    assert typecheck("READS", "Technology", "Component")
+    assert typecheck("WRITES", "Technology", "Component")
+    assert not typecheck("READS", "Concept", "Component")
+
+
 def test_semantic_relations_never_touch_context_types():
     assert not ENTITY_TYPES & CONTEXT_TYPES
     for rel in SEMANTIC_RELATIONS:

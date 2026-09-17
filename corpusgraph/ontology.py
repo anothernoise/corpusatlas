@@ -73,8 +73,12 @@ RELATIONS: dict[str, tuple[set[str], set[str]]] = {
     "HAS_COMPONENT":     (TECH_LIKE, {"Component", "API"}),
     "BASED_ON":          (TECH_LIKE, TECH_LIKE | {"Concept", "Standard"}),
     "INCLUDED_IN":       ({"Technology", "Component"}, {"Product", "CloudService"}),
-    "READS":             (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "CloudService"}),
-    "WRITES":            (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "CloudService"}),
+    # Component is a valid target as well as source: a storage subsystem like
+    # HDFS is a Component of Hadoop, and it is exactly the kind of thing
+    # another technology reads and writes — the same reasoning RUNS_ON
+    # already applies to a cluster manager that is itself a Component.
+    "READS":             (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "Component", "CloudService"}),
+    "WRITES":            (TECH_LIKE, {"FileFormat", "TableFormat", "Technology", "Component", "CloudService"}),
     "RUNS_ON":           (TECH_LIKE, {"Technology", "Component", "Product", "CloudService"}),
     # DEPENDS-style claims are deliberately absent: an optional integration is
     # INTEGRATES_WITH, and a graph that confuses the two ends up claiming Spark
