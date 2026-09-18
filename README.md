@@ -1,5 +1,9 @@
 # corpusatlas
 
+[![CI](https://github.com/anothernoise/corpusatlas/actions/workflows/ci.yml/badge.svg)](https://github.com/anothernoise/corpusatlas/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 Turn a corpus of markdown and structured data into a knowledge graph you can
 ship as a static file.
 
