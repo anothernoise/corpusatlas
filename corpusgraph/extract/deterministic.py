@@ -124,7 +124,8 @@ class DeterministicExtractor:
                             if a != b:
                                 pairs.add(tuple(sorted((a, b))))
             for a, b in sorted(pairs):
-                edges.append(Edge(a, "COMPARES_TO", b, dict(prov, via="scorecard")))
+                edges.append(Edge(a, "COMPARES_TO", b, dict(prov, via="scorecard"),
+                                  explanation=f'Both were scored on the same axes in the "{d.title}" assessment.'))
 
             if d.kind == "radar-entry":
                 edges.extend(self._radar_edges(d, prov))

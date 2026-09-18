@@ -172,6 +172,12 @@ def test_comparisons_are_stored_once_per_pair():
     assert len(pairs) == len(set(pairs))
 
 
+def test_comparisons_carry_an_explanation_naming_the_assessment():
+    _, edges = build()
+    compared = next(e for e in edges if e.rel == "COMPARES_TO")
+    assert compared.explanation == 'Both were scored on the same axes in the "OLAP" assessment.'
+
+
 def test_radar_entry_joins_its_entity_assessment_and_page():
     _, edges = build()
     r = rels(edges)
