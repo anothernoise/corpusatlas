@@ -1,4 +1,5 @@
 """Tests for the invariants that actually matter."""
+import io
 import json
 import sys
 import tempfile
@@ -6,14 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from corpusgraph.__main__ import cmd_validate
-from corpusgraph.adapters.entity_packs import EntityPacksAdapter
-from corpusgraph.emit import write_graph
-from corpusgraph.extract import DeterministicExtractor, MentionsExtractor, PackError, PacksExtractor
-from corpusgraph.merge import merge
-from corpusgraph.model import Document, Edge, Node
-from corpusgraph.ontology import CONTEXT_TYPES, ENTITY_TYPES, RELATIONS, SEMANTIC_RELATIONS, typecheck
-from corpusgraph.resolve import RegistryError, Resolver
+from corpusatlas.__main__ import cmd_validate
+from corpusatlas.adapters.entity_packs import EntityPacksAdapter
+from corpusatlas.emit import write_graph
+from corpusatlas.extract import DeterministicExtractor, MentionsExtractor, PackError, PacksExtractor
+from corpusatlas.merge import merge
+from corpusatlas.model import Document, Edge, Node
+from corpusatlas.ontology import CONTEXT_TYPES, ENTITY_TYPES, RELATIONS, SEMANTIC_RELATIONS, typecheck
+from corpusatlas.resolve import RegistryError, Resolver
 
 REGISTRY = [
     {"id": "apache-spark", "name": "Apache Spark", "type": "Technology", "aliases": ["Spark"],
@@ -282,6 +283,43 @@ def test_deleting_a_pack_retracts_exactly_its_claims():
     assert not [e for e in edges if e.prov.get("doc") == "pack:spark"]
     assert "entity:lazy-evaluation" not in nodes
     assert ("entity:clickhouse", "HAS_RADAR_ENTRY", "radar:clickhouse") in rels(edges)
+
+
+def test_pack_urls_resolve_through_the_configured_prefixes():
+    # A corpus that publishes articles somewhere other than /blog/ still joins
+    # its packs to its documents — the prefixes are configuration, not a constant.
+    pack = pack_doc(entities=[
+        {"id": "apache-spark", "name": "Spark", "type": "Technology",
+         "blog_url": "https://example.org/posts/a",
+         "architecture_radar_url": "https://example.org/calls/olap"},
+    ], relationships=[])
+    ex = PacksExtractor(resolver=resolver(), site_url="https://example.org",
+                        blog_prefix="/posts/", assessment_prefix="/calls/",
+                        assessment_id_prefix="call:")
+    _, edges = ex.run([pack])
+    assert ("entity:apache-spark", "PRIMARY_TOPIC_OF", "a") in rels(edges)
+    assert ("entity:apache-spark", "DISCUSSED_IN", "call:olap") in rels(edges)
+
+
+def test_pack_url_prefixes_default_to_the_built_in_shape():
+    cfg_built = PacksExtractor.from_config({}, resolver=resolver())
+    _, edges = cfg_built.run([pack_doc()])
+    assert ("entity:apache-spark", "PRIMARY_TOPIC_OF", "a") in rels(edges)
+
+
+def test_a_pack_url_matching_no_prefix_is_reported_not_swallowed():
+    pack = pack_doc(entities=[
+        {"id": "apache-spark", "name": "Spark", "type": "Technology",
+         "blog_url": "/elsewhere/a"},
+    ], relationships=[])
+    err = io.StringIO()
+    stderr, sys.stderr = sys.stderr, err
+    try:
+        _, edges = PacksExtractor(resolver=resolver()).run([pack])
+    finally:
+        sys.stderr = stderr
+    assert not [e for e in edges if e.rel == "PRIMARY_TOPIC_OF"]
+    assert "/elsewhere/a" in err.getvalue()
 
 
 def expect_pack_error(pack):

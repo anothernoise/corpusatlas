@@ -3,7 +3,7 @@ entity vocabulary — every entity the registry defines, and every entity a
 pack declares.
 
 This is deliberately NOT "NER or an LLM over prose". Nothing here calls a
-model or touches the network, so `corpusgraph build` still runs on a laptop
+model or touches the network, so `corpusatlas build` still runs on a laptop
 with no API key and produces the same bytes every time. What it buys is
 reach: an article that discusses Apache Spark at length but was never tagged
 "spark" still gets linked to it, and the vocabulary grows every time the

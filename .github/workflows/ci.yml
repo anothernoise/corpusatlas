@@ -1,10 +1,9 @@
-# Standalone CI for corpusgraph.
+# The module has no runtime dependencies and its tests carry their own
+# fixtures, so this is the whole gate: it installs, the console script is
+# wired, and the pipeline holds its invariants on every supported Python.
 #
-# This file is inert while the package lives under tools/corpusgraph in the
-# shirokoff.ca repo — GitHub only reads workflows from the repository root. It
-# activates the moment the package is extracted into its own repository
-# (see README → "Extracting this into its own repository"), so the split lands
-# with working CI on day one.
+# Building a real corpus — with real source paths and a real entity registry —
+# is the consuming repo's job, not this one's.
 name: ci
 
 on:
@@ -29,7 +28,7 @@ jobs:
         run: python -m pip install -e .
 
       - name: Console script is wired
-        run: corpusgraph --help
+        run: corpusatlas --help
 
       - name: Tests
         # tests/ carries self-contained fixtures and exercises the full

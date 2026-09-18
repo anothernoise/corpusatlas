@@ -1,4 +1,4 @@
-# corpusgraph
+# corpusatlas
 
 Turn a corpus of markdown and structured data into a knowledge graph you can
 ship as a static file.
@@ -14,7 +14,7 @@ Two rules keep this a module rather than a framework:
 
 1. **Sources are adapters.** Every adapter yields the same `Document` shape.
    The core never learns the name of your blog, your book, or your CMS.
-2. **Output is files.** `corpusgraph` writes `graph.json` and exits. It owns no
+2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 
 ```
@@ -26,15 +26,21 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install -e .          # installs the `corpusgraph` console script
-python tests/run.py       # invariant tests, stdlib only
+pip install git+https://github.com/anothernoise/corpusatlas@v0.4.0
 
-corpusgraph build --config corpusgraph.toml --out graph.json
-corpusgraph stats    --graph graph.json
-corpusgraph validate --graph graph.json
+corpusatlas build --config example.toml --out graph.json
+corpusatlas stats    --graph graph.json
+corpusatlas validate --graph graph.json
 ```
 
-`python3 -m corpusgraph …` works too, without installing — the console script
+Working on the module itself:
+
+```bash
+pip install -e .          # installs the `corpusatlas` console script
+python tests/run.py       # invariant tests, stdlib only
+```
+
+`python3 -m corpusatlas …` works too, without installing — the console script
 and the module entry point are the same `main()`.
 
 ## Configuration
@@ -42,27 +48,37 @@ and the module entry point are the same `main()`.
 ```toml
 [[sources]]
 type     = "html_blog"          # adapter name
-path     = "../../blog"
+path     = "../blog"
 url_base = "/blog/"
 
 [[sources]]
 type = "radar_scorecards"
-path = "../../architecture-radar/scorecards.json"
+path = "../architecture-radar/scorecards.json"
 
 [[sources]]
 type = "radar_entries"
-path = "../../architecture-radar/radar.json"
+path = "../architecture-radar/radar.json"
 
 [[sources]]
 type     = "entity_packs"
-path     = "../../knowledge-base/entities"
+path     = "entities"
 url_base = "/knowledge-base/entities/"
 
 [ontology]
-entities = "../../knowledge-base/entities.toml"
+entities = "entities.toml"
+
+# Packs cite their sources by URL; the graph joins on document id. This says
+# how to get from one to the other, and defaults to the values below minus
+# site_url — a corpus published under /blog/ can leave the section out.
+[packs]
+site_url             = "https://example.org"
+blog_prefix          = "/blog/"
+assessment_prefix    = "/architecture-radar/"
+assessment_id_prefix = "assessment:"
 ```
 
-Every path resolves relative to the config file.
+Every path resolves relative to the config file, so the config lives with the
+corpus and this module stays portable. See `example.toml`.
 
 ## Ontology
 
@@ -79,7 +95,7 @@ Two kinds of node, and the split is the design:
 Semantic relations (`IMPLEMENTS`, `HAS_COMPONENT`, `READS`, `RUNS_ON`,
 `MANAGED_BY`, `ALTERNATIVE_TO`, ...) join entities. Context relations
 (`COVERS`, `HAS_RADAR_ENTRY`, `ASSESSES`, ...) join entities to their
-evidence. `corpusgraph validate` refuses a semantic edge that touches a
+evidence. `corpusatlas validate` refuses a semantic edge that touches a
 context node. The artifact carries `entity_types` and `inverse_labels`, so a
 renderer never hard-codes the split.
 
@@ -133,26 +149,17 @@ Every edge carries where it came from:
 An edge is a claim made *by* a document. When the document goes, the claim goes
 with it — `merge.py` handles retraction, not just append.
 
-## Extracting this into its own repository
+## Used by
 
-It is deliberately self-contained: no imports from the site, all paths from
-config, its own tests. When it earns a life of its own:
+[shirokoff.ca/knowledge-base](https://shirokoff.ca/knowledge-base/) builds its
+graph with this module in CI on every push: ~290 articles, 16 scored
+assessments and a set of curated entity packs become one `graph.json`, rendered
+as an interactive canvas and as a
+[plain-HTML list](https://shirokoff.ca/knowledge-base/entities). The site holds
+the corpus, the config and the entity registry; this repo holds the engine.
 
-```bash
-git subtree split --prefix=tools/corpusgraph -b corpusgraph
-# then push that branch to a new repo — full history preserved
-```
-
-Everything needed to stand on its own already ships here: `pyproject.toml`,
-`LICENSE`, `.gitignore`, tests, and `.github/workflows/ci.yml` (inert in the
-site repo, since GitHub only reads workflows from the repository root — it runs
-the moment the package becomes a repository of its own). The site installs this
-as a package and drives it through the `corpusgraph` console script, so the
-split changes the install source and nothing else.
-
-Until there is a second consumer, keeping it here means one commit changes the
-pipeline and the page that renders its output together, and CI needs no
-cross-repo credentials.
+It grew inside that site's repository and was split out with
+`git subtree split`, so the history below predates this repository.
 
 ## Licence
 

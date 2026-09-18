@@ -1,0 +1,33 @@
+# A worked example. Every path resolves relative to this file, so the config
+# can live wherever the corpus does — this module does not care where it is
+# installed from.
+
+[[sources]]
+type     = "html_blog"          # adapter name
+path     = "../blog"            # a directory of rendered articles
+url_base = "/blog/"             # what those articles are published under
+
+[[sources]]
+type = "radar_scorecards"
+path = "../architecture-radar/scorecards.json"
+
+[[sources]]
+type = "radar_entries"
+path = "../architecture-radar/radar.json"
+
+[[sources]]
+type     = "entity_packs"
+path     = "entities"
+url_base = "/knowledge-base/entities/"
+
+[ontology]
+entities = "entities.toml"      # the entity registry
+
+# Packs cite their sources by URL; the graph joins on document id. These say
+# how to get from one to the other. The defaults are the values below minus
+# site_url, so a corpus published at /blog/ needs none of this.
+[packs]
+site_url             = "https://example.org"   # optional; stripped from absolute URLs
+blog_prefix          = "/blog/"
+assessment_prefix    = "/architecture-radar/"
+assessment_id_prefix = "assessment:"

@@ -1,4 +1,4 @@
-"""corpusgraph CLI — build, stats, validate."""
+"""corpusatlas CLI — build, stats, validate."""
 from __future__ import annotations
 
 import argparse
@@ -39,7 +39,7 @@ def cmd_build(args) -> int:
     # to see what the earlier tiers named before it can search for it.
     det = DeterministicExtractor(resolver=resolver)
     det_nodes, det_edges = (list(x) for x in det.run(docs))
-    packs = PacksExtractor(resolver=resolver)
+    packs = PacksExtractor.from_config(cfg, resolver=resolver)
     pack_nodes, pack_edges = (list(x) for x in packs.run(docs))
     mentions = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver)
     ment_nodes, ment_edges = (list(x) for x in mentions.run(docs))
@@ -127,11 +127,11 @@ def cmd_validate(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="corpusgraph")
+    p = argparse.ArgumentParser(prog="corpusatlas")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     b = sub.add_parser("build", help="build the graph from a config")
-    b.add_argument("--config", default="corpusgraph.toml")
+    b.add_argument("--config", default="corpusatlas.toml")
     b.add_argument("--out", required=True)
     b.set_defaults(fn=cmd_build)
 

@@ -5,6 +5,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+from . import __version__
 from .ontology import CONTEXT_RELATIONS, ENTITY_TYPES, INVERSE_LABEL, RELATION_GROUPS
 
 
@@ -17,7 +18,7 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str]) -> 
     present = {e.rel for e in edges}
     payload = {
         "generated": date.today().isoformat(),
-        "generator": "corpusgraph 0.3.0",
+        "generator": f"corpusatlas {__version__}",
         "sources": sources,
         "counts": {"nodes": len(nodes), "edges": len(edges)},
         # What a renderer needs to draw this graph without hard-coding the

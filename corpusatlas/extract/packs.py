@@ -22,35 +22,59 @@ that cannot be stored is a mistake someone needs to hear about.
 from __future__ import annotations
 
 import re
+import sys
 
 from ..model import Document, Edge, Node
 from ..ontology import SEMANTIC_RELATIONS, SYMMETRIC, canonical, validate_edge
 from ..resolve import Resolver, entity_id
 
-_BLOG = re.compile(r"^(?:https://shirokoff\.ca)?/blog/([a-z0-9-]+)/?$")
-_RADAR = re.compile(r"^(?:https://shirokoff\.ca)?/architecture-radar/([a-z0-9-]+)/?$")
+BLOG_PREFIX = "/blog/"
+ASSESSMENT_PREFIX = "/architecture-radar/"
+ASSESSMENT_ID_PREFIX = "assessment:"
 
 
 class PackError(ValueError):
     pass
 
 
-def blog_doc_id(url: str | None) -> str | None:
-    m = _BLOG.match(url or "")
-    return m.group(1) if m else None
+def url_matcher(prefix: str, *, site_url: str | None = None, id_prefix: str = ""):
+    """Turn the URLs a pack cites into the document ids the graph joins on.
 
+    Which URLs a corpus publishes is the corpus's business, so the shape is
+    configuration rather than a constant — see [packs] in the config file.
+    """
+    site = re.escape(site_url.rstrip("/")) if site_url else ""
+    pattern = re.compile(rf"^(?:{site})?{re.escape(prefix)}([a-z0-9-]+)/?$")
 
-def radar_doc_id(url: str | None) -> str | None:
-    m = _RADAR.match(url or "")
-    return f"assessment:{m.group(1)}" if m else None
+    def doc_id(url: str | None) -> str | None:
+        m = pattern.match(url or "")
+        return f"{id_prefix}{m.group(1)}" if m else None
+
+    return doc_id
 
 
 class PacksExtractor:
     name = "packs@2"
     tier = "curated"
 
-    def __init__(self, resolver: Resolver | None = None):
+    def __init__(self, resolver: Resolver | None = None, *,
+                 site_url: str | None = None,
+                 blog_prefix: str = BLOG_PREFIX,
+                 assessment_prefix: str = ASSESSMENT_PREFIX,
+                 assessment_id_prefix: str = ASSESSMENT_ID_PREFIX):
         self.resolver = resolver or Resolver()
+        self.blog_doc_id = url_matcher(blog_prefix, site_url=site_url)
+        self.assessment_doc_id = url_matcher(assessment_prefix, site_url=site_url,
+                                             id_prefix=assessment_id_prefix)
+
+    @classmethod
+    def from_config(cls, cfg: dict, resolver: Resolver | None = None) -> "PacksExtractor":
+        p = cfg.get("packs") or {}
+        return cls(resolver=resolver,
+                   site_url=p.get("site_url"),
+                   blog_prefix=p.get("blog_prefix", BLOG_PREFIX),
+                   assessment_prefix=p.get("assessment_prefix", ASSESSMENT_PREFIX),
+                   assessment_id_prefix=p.get("assessment_id_prefix", ASSESSMENT_ID_PREFIX))
 
     def run(self, docs: list[Document]):
         nodes: list[Node] = []
@@ -61,6 +85,7 @@ class PacksExtractor:
             pack = d.meta["pack"]
             prov = {"doc": d.id, "tier": self.tier, "extractor": self.name}
             declared: dict[str, str] = {}
+            unmatched: list[str] = []
 
             for e in pack.get("entities", []):
                 eid = entity_id(e["id"])
@@ -79,14 +104,26 @@ class PacksExtractor:
                                   aliases=tuple(e.get("aliases") or ()), urls=urls, meta=meta))
 
                 page = dict(prov, via="pack-url")
-                if blog_doc_id(e.get("blog_url")):
-                    edges.append(Edge(eid, "PRIMARY_TOPIC_OF", blog_doc_id(e["blog_url"]), dict(page)))
-                for u in e.get("related_blog_urls") or ():
-                    if blog_doc_id(u):
-                        edges.append(Edge(eid, "DISCUSSED_IN", blog_doc_id(u), dict(page)))
-                if radar_doc_id(e.get("architecture_radar_url")):
-                    edges.append(Edge(eid, "DISCUSSED_IN", radar_doc_id(e["architecture_radar_url"]),
-                                      dict(page)))
+                # Order matters: it is the order these edges reach merge, and
+                # so the order they reach the artifact.
+                cites = [("blog_url", "PRIMARY_TOPIC_OF", self.blog_doc_id, e.get("blog_url"))]
+                cites += [("related_blog_urls", "DISCUSSED_IN", self.blog_doc_id, u)
+                          for u in e.get("related_blog_urls") or ()]
+                cites.append(("architecture_radar_url", "DISCUSSED_IN", self.assessment_doc_id,
+                              e.get("architecture_radar_url")))
+                for field, rel, match, cited in cites:
+                    if not cited:
+                        continue
+                    doc_id = match(cited)
+                    if doc_id:
+                        edges.append(Edge(eid, rel, doc_id, dict(page)))
+                    else:
+                        unmatched.append(f"{e['id']}: {field} {cited}")
+
+            # A URL that matches no prefix yields no edge. That is silent data
+            # loss when the prefixes are simply misconfigured, so say so.
+            for line in unmatched:
+                print(f"  warning: {d.id}: {line} matched no [packs] prefix", file=sys.stderr)
 
             seen: set[tuple] = set()
             for rel_spec in pack.get("relationships", []):
