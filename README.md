@@ -235,6 +235,7 @@ extraction, so it works on any `graph.json` this module ever wrote:
 corpusatlas convert --graph graph.json --format graphml --out graph.graphml
 corpusatlas convert --graph graph.json --format csv --out-dir csv/
 corpusatlas convert --graph graph.json --format neo4j --out-dir neo4j/
+corpusatlas convert --graph graph.json --format turtle --out graph.ttl
 ```
 
 GraphML opens directly in Gephi, yEd, NetworkX (`nx.read_graphml`) or igraph
@@ -249,11 +250,20 @@ label, type, degree and url; an edge's relation, confidence, explanation and
 scope — rather than trying to be the complete record; `graph.json` still is
 that, provenance and all.
 
-Turtle/RDF was considered and set aside: unlike these two, it isn't a
-converter over the same fields — mapping confidence and provenance onto RDF
-means picking namespaces and deciding between reification and named graphs,
-a modelling decision rather than a format choice. Worth doing if something
-needs to `SPARQL` this graph; not worth doing speculatively.
+`turtle` is the odd one out: unlike the three above, it isn't a reformat of
+the same fields — RDF has no single obvious mapping for a typed, provenanced
+graph like this one, so it's a real modelling decision, not a converter.
+Every node becomes a resource under `--base` (a placeholder by default —
+pick your own for anything meant to be dereferenced); a node's ontology type
+becomes its `rdf:type`, and an edge's relation becomes the predicate
+directly (`ca:IMPLEMENTS`, not a generic "relatedTo"). Confidence,
+explanation, scope and provenance can't ride on a plain triple, so an edge
+carrying any of them is written twice — once as the bare triple a simple
+SPARQL query expects, once as a standard `rdf:Statement` reification
+carrying the metadata — chosen over RDF-star or singleton properties for
+being the more broadly compatible option. See `corpusatlas/rdf_export.py`
+for the full reasoning. Worth doing because something now needs to `SPARQL`
+this graph; wasn't worth doing speculatively before that was true.
 
 ## Used by
 

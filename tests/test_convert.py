@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from corpusatlas.csv_export import write_csv
 from corpusatlas.graphml import write_graphml
 from corpusatlas.neo4j_export import write_neo4j_csv
+from corpusatlas.rdf_export import write_turtle
 
 GRAPH = {
     "generated": "2026-09-19",
@@ -164,3 +165,67 @@ def test_neo4j_csv_quoting_survives_commas_and_quotes_and_missing_fields():
     a_to_c = next(r for r in rels if r[0] == "entity:a" and r[1] == "entity:c")
     assert a_to_c[2] == "COMPLEMENTS"
     assert a_to_c[3] == ""  # no confidence on this edge — blank, not "None"
+
+
+# --- turtle -----------------------------------------------------------------
+
+def test_turtle_declares_every_node_as_a_typed_resource_with_a_label():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.ttl"
+        write_turtle(path, GRAPH)
+        text = path.read_text(encoding="utf-8")
+
+    assert "<entity_a> a ca:Technology" in text
+    assert "<entity_b> a ca:Concept" in text
+    # The label's own quote and ampersand must be escaped, not break parsing.
+    assert 'rdfs:label "A & \\"the\\" <first>"' in text
+
+
+def test_turtle_writes_a_plain_triple_for_every_edge():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.ttl"
+        write_turtle(path, GRAPH)
+        text = path.read_text(encoding="utf-8")
+
+    assert "<entity_a> ca:IMPLEMENTS <entity_b> ." in text
+    assert "<entity_a> ca:COMPLEMENTS <entity_c> ." in text
+
+
+def test_turtle_reifies_only_edges_that_actually_carry_metadata():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.ttl"
+        write_turtle(path, GRAPH)
+        text = path.read_text(encoding="utf-8")
+
+    # entity:a -IMPLEMENTS-> entity:b has confidence + explanation: reified.
+    assert "rdf:Statement" in text
+    assert "ca:confidence 0.9" in text
+    assert 'ca:explanation "Cites \\"a source\\", with a comma."' in text
+    # entity:a -COMPLEMENTS-> entity:c carries nothing extra: exactly one
+    # rdf:Statement block should exist in the whole file, not two.
+    assert text.count("a rdf:Statement") == 1
+
+
+def test_turtle_base_is_configurable():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.ttl"
+        write_turtle(path, GRAPH, base="https://example.org/kg/")
+        text = path.read_text(encoding="utf-8")
+
+    assert "@base <https://example.org/kg/> ." in text
+
+
+def test_turtle_is_syntactically_well_formed_prefixed_blocks():
+    """No real Turtle parser here (stdlib only) — instead, check the
+    mechanical invariant a parser would actually enforce: every statement
+    block is terminated by a line ending in " ." and nothing is left
+    dangling on a trailing " ;"."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.ttl"
+        write_turtle(path, GRAPH)
+        lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    blocks = [l for l in lines if not l.startswith("@")]
+    assert blocks, "expected at least one statement"
+    for l in blocks:
+        assert l.rstrip().endswith((";", ".")), f"malformed line: {l!r}"

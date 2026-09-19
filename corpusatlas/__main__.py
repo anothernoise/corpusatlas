@@ -17,6 +17,7 @@ from .graphml import write_graphml
 from .merge import merge
 from .neo4j_export import write_neo4j_csv
 from .ontology import DEFAULT, Ontology, OntologyError, TIERS
+from .rdf_export import DEFAULT_BASE, write_turtle
 from .resolve import Resolver
 
 
@@ -194,6 +195,12 @@ def cmd_convert(args) -> int:
               f"Load with, e.g.:\n"
               f"  neo4j-admin database import full --nodes={nodes_path} "
               f"--relationships={rels_path} neo4j")
+    elif args.format == "turtle":
+        if not args.out:
+            print("convert --format turtle needs --out", file=sys.stderr)
+            return 1
+        write_turtle(Path(args.out), g, base=args.base or DEFAULT_BASE)
+        print(f"wrote {args.out}")
     return 0
 
 
@@ -285,9 +292,10 @@ def main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser("convert", help="reformat a built graph as GraphML or CSV")
     c.add_argument("--graph", required=True)
-    c.add_argument("--format", choices=["graphml", "csv", "neo4j"], required=True)
-    c.add_argument("--out", help="output file, for --format graphml")
+    c.add_argument("--format", choices=["graphml", "csv", "neo4j", "turtle"], required=True)
+    c.add_argument("--out", help="output file, for --format graphml or turtle")
     c.add_argument("--out-dir", help="output directory, for --format csv or neo4j")
+    c.add_argument("--base", help=f"resource IRI base, for --format turtle (default: {DEFAULT_BASE})")
     c.set_defaults(fn=cmd_convert)
 
     oc = sub.add_parser("ontology-check", help="validate a schema file on its own, no corpus needed")
