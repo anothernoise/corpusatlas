@@ -241,8 +241,8 @@ def cmd_registry_check(args) -> int:
         return 1
 
     by_type: dict[str, int] = {}
-    for _, e in resolver.entities():
-        by_type[e["type"]] = by_type.get(e["type"], 0) + 1
+    for _, entity in resolver.entities():
+        by_type[entity["type"]] = by_type.get(entity["type"], 0) + 1
     print(f"registry valid: {len(entities)} entities")
     for t, n in sorted(by_type.items(), key=lambda kv: -kv[1]):
         print(f"  {t:<20} {n:>4}")
