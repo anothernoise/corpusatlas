@@ -63,6 +63,39 @@ def test_ontology_check_through_the_real_cli_argv():
         assert main(["ontology-check", "--schema", str(bad)]) == 1
 
 
+def test_ontology_check_dot_renders_every_type_and_relation():
+    with tempfile.TemporaryDirectory() as d:
+        schema = write(Path(d) / "ontology.toml", GOOD_SCHEMA)
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert main(["ontology-check", "--schema", str(schema), "--dot"]) == 0
+        dot = buf.getvalue()
+
+        assert dot.startswith("digraph ontology {")
+        assert dot.count("{") == dot.count("}") == 1
+        assert '"Dish";' in dot
+        assert '"Ingredient";' in dot
+        assert '"Document" [shape=ellipse' in dot  # context type, different shape
+        assert '"Dish" -> "Ingredient" [label="USES_INGREDIENT"' in dot
+
+
+def test_ontology_check_dot_still_fails_on_a_broken_schema():
+    with tempfile.TemporaryDirectory() as d:
+        schema = write(Path(d) / "ontology.toml", BAD_SCHEMA)
+        assert main(["ontology-check", "--schema", str(schema), "--dot"]) == 1
+
+
+def test_default_ontology_to_dot_is_well_formed():
+    from corpusatlas.ontology import DEFAULT
+    dot = DEFAULT.to_dot()
+    assert dot.count("{") == dot.count("}") == 1
+    assert dot.startswith("digraph ontology {") and dot.rstrip().endswith("}")
+    for t in DEFAULT.entity_types | DEFAULT.context_types:
+        assert f'"{t}"' in dot
+
+
 # --- registry-check --------------------------------------------------------
 
 GOOD_ENTITIES = """

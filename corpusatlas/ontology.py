@@ -121,6 +121,38 @@ class Ontology:
     def inverse_label(self) -> dict[str, str]:
         return {v: k for k, v in self.inverse.items()}
 
+    def to_dot(self) -> str:
+        """A Graphviz DOT rendering of this ontology's own type/relation
+        graph — the vocabulary itself, not any data built against it.
+        `ontology-check --dot` exists because the command's normal output
+        (counts, pass/fail) tells you a schema is internally consistent but
+        not what it actually looks like — this is for a schema author
+        checking the shape of what they wrote, the same way `stats`
+        summarises a graph rather than just validating it.
+
+        Entities are filled boxes, context types filled ellipses (matching
+        the split the README and the viewer both draw); a relation gets one
+        edge per concrete (source, target) pair it actually allows, dashed
+        for a context relation (a claim's evidence link) and solid for a
+        semantic one (a claim between two entities)."""
+        lines = ["digraph ontology {", "  rankdir=LR;",
+                 '  node [shape=box, style=filled, fontname="Helvetica", fillcolor="#cfe8ff"];']
+        # Declared explicitly, not left to appear implicitly from an edge —
+        # a type with no relations touching it (unusual, but valid) still
+        # has to show up, or the diagram would silently under-report the
+        # schema's own vocabulary.
+        for t in sorted(self.entity_types):
+            lines.append(f'  "{t}";')
+        for t in sorted(self.context_types):
+            lines.append(f'  "{t}" [shape=ellipse, fillcolor="#ffe6b3"];')
+        for rel, (srcs, dsts) in sorted(self.relations.items()):
+            style = "dashed" if rel in self.context_relations else "solid"
+            for s in sorted(srcs):
+                for d in sorted(dsts):
+                    lines.append(f'  "{s}" -> "{d}" [label="{rel}", style={style}];')
+        lines.append("}")
+        return "\n".join(lines)
+
     def typecheck(self, rel: str, src_type: str, dst_type: str) -> bool:
         spec = self.relations.get(rel)
         if spec is None:

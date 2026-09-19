@@ -314,6 +314,9 @@ def cmd_ontology_check(args) -> int:
     except OntologyError as e:
         print(f"  FAIL {e}", file=sys.stderr)
         return 1
+    if getattr(args, "dot", False):
+        print(o.to_dot())
+        return 0
     print(f"schema valid: {len(o.entity_types)} entity types, {len(o.context_types)} context types")
     print(f"{len(o.relations)} relations: {len(o.semantic_relations)} semantic, "
           f"{len(o.context_relations)} context")
@@ -440,6 +443,8 @@ def main(argv: list[str] | None = None) -> int:
 
     oc = sub.add_parser("ontology-check", help="validate a schema file on its own, no corpus needed")
     oc.add_argument("--schema", required=True)
+    oc.add_argument("--dot", action="store_true",
+                    help="print the schema's own type/relation graph as Graphviz DOT instead")
     oc.set_defaults(fn=cmd_ontology_check)
 
     rc = sub.add_parser("registry-check",

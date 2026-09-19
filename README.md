@@ -64,8 +64,13 @@ Iterating on a custom ontology or a registry doesn't need a corpus at all:
 
 ```bash
 corpusatlas ontology-check --schema ontology.toml
+corpusatlas ontology-check --schema ontology.toml --dot | dot -Tsvg -o ontology.svg
 corpusatlas registry-check --entities entities.toml
 ```
+
+`--dot` renders the schema's own type/relation graph as Graphviz DOT — the
+vocabulary itself, not any data built against it, useful while actually
+designing one rather than only checking it's internally consistent.
 
 On a large corpus, `build --cache .corpusatlas_cache.json` skips re-parsing
 any `html_blog`/`obsidian`/`logseq` file whose content hasn't changed since
