@@ -4,9 +4,20 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 from . import __version__
 from .ontology import DEFAULT, Ontology
+
+# The artifact's own shape, independent of the package version that wrote
+# it — `generator` says which corpusatlas built this file, but a consumer
+# that wants to know whether it understands the *fields* (not the code that
+# produced them) needs something that only changes when the shape does.
+# Bump this when a field's meaning or presence changes in a way a consumer
+# would need to branch on; a purely additive field (like `context_types` in
+# 0.5.0) does not require a bump, since old readers already ignore keys they
+# don't recognise.
+SCHEMA_VERSION = 1
 
 
 def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str],
@@ -18,6 +29,7 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str],
 
     present = {e.rel for e in edges}
     payload = {
+        "schema_version": SCHEMA_VERSION,
         "generated": date.today().isoformat(),
         "generator": f"corpusatlas {__version__}",
         "sources": sources,
@@ -47,4 +59,4 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str],
     # byte-identical file, or every CI run creates a pointless commit.
     path.write_text(json.dumps(payload, indent=1, ensure_ascii=False, sort_keys=False) + "\n",
                     encoding="utf-8")
-    return payload["counts"]
+    return cast(dict, payload["counts"])

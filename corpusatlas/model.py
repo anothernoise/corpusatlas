@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
-_EMPTY = (None, {}, (), [], "")
+_EMPTY: tuple[object, ...] = (None, {}, (), [], "")
 
 
 @dataclass(frozen=True)

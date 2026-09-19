@@ -235,18 +235,26 @@ class Ontology:
             if r.get("inverse"):
                 inverse[r["inverse"]] = name
 
-        kwargs = dict(
+        relation_groups = {g: tuple(rs) for g, rs in groups.items()}
+        if extends == "default":
+            return DEFAULT.extend(
+                entity_types=entity_types,
+                context_types=context_types,
+                relations=relations,
+                inverse=inverse,
+                relation_groups=relation_groups,
+                context_relations=tuple(context_relations),
+                symmetric=frozenset(symmetric),
+            )
+        return cls(
             entity_types=entity_types,
             context_types=context_types,
             relations=relations,
             inverse=inverse,
-            relation_groups={g: tuple(rs) for g, rs in groups.items()},
+            relation_groups=relation_groups,
             context_relations=tuple(context_relations),
             symmetric=frozenset(symmetric),
         )
-        if extends == "default":
-            return DEFAULT.extend(**kwargs)
-        return cls(**kwargs)
 
 
 TECH_LIKE = frozenset({"Technology", "Component", "Product", "CloudService", "Language", "API",

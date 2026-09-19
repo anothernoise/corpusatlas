@@ -62,7 +62,7 @@ class MentionsExtractor:
         resolver = resolver or Resolver()
         # One compiled pattern per entity, built once, so a few hundred
         # articles scan in a second or two.
-        self._entries: list[tuple[str, re.Pattern, int]] = []
+        self._entries: list[tuple[str, re.Pattern | None, re.Pattern]] = []
         seen: set[str] = set()
         for n in vocabulary:
             if n.type not in ontology.entity_types or n.type in NOT_MENTIONED or n.id in seen:
@@ -83,7 +83,9 @@ class MentionsExtractor:
             # name ("Amazon EMR") is a claim, but a short alias of the same
             # entity ("EMR") has to show up twice on its own merits.
             long_forms = {f for f in forms if len(f) >= LONG}
-            self._entries.append((n.id, _pattern(long_forms, flags), _pattern(forms, flags)))
+            any_pattern = _pattern(forms, flags)
+            assert any_pattern is not None  # forms was already checked non-empty above
+            self._entries.append((n.id, _pattern(long_forms, flags), any_pattern))
         self._entries.sort(key=lambda x: x[0])
 
     def run(self, docs: list[Document]):

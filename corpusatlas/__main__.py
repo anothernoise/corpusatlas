@@ -10,7 +10,7 @@ from . import __version__
 from . import config as cfgmod
 from .adapters import build as build_adapter
 from .csv_export import write_csv
-from .emit import write_graph
+from .emit import SCHEMA_VERSION, write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
 from .graphml import write_graphml
 from .merge import merge
@@ -78,7 +78,8 @@ def cmd_stats(args) -> int:
     for e in g["edges"]:
         by_rel[e["rel"]] = by_rel.get(e["rel"], 0) + 1
 
-    print(f"generated {g['generated']} by {g['generator']}")
+    print(f"generated {g['generated']} by {g['generator']} "
+          f"(schema {g.get('schema_version', '<1')})")
     print(f"{g['counts']['nodes']} nodes, {g['counts']['edges']} edges\n")
     print("nodes by type:")
     for k, v in sorted(by_type.items(), key=lambda kv: -kv[1]):
@@ -104,6 +105,15 @@ def cmd_validate(args) -> int:
     still validates.
     """
     g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    # A newer schema_version means a future corpusatlas changed the artifact's
+    # shape in a way this build doesn't know about — not necessarily invalid
+    # (the checks below are still meaningful over the fields they know), but
+    # worth a heads-up rather than a silent pass on fields this code can't see.
+    seen_version = g.get("schema_version", 0)
+    if seen_version > SCHEMA_VERSION:
+        print(f"  warning: graph is schema_version {seen_version}, this corpusatlas "
+              f"knows up to {SCHEMA_VERSION} — some checks may not see newer fields",
+              file=sys.stderr)
     entity_types = set(g.get("entity_types") or ())
     context_types = set(g.get("context_types") or DEFAULT.context_types)
     node_types = entity_types | context_types

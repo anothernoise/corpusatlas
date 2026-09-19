@@ -438,3 +438,4 @@ def test_the_artifact_is_byte_identical_and_self_describing():
         assert set(g["entity_types"]) == ENTITY_TYPES
         assert g["inverse_labels"]["IMPLEMENTS"] == "IMPLEMENTED_BY"
         assert all(n["type"] in ENTITY_TYPES | CONTEXT_TYPES for n in g["nodes"])
+        assert g["schema_version"] == 1

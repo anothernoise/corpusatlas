@@ -50,7 +50,7 @@ class _TextExtractor(HTMLParser):
         self._in_title = False
         self._chunks: list[str] = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP_TAGS:
             self._skip_depth += 1
         elif tag == "title":
@@ -60,7 +60,7 @@ class _TextExtractor(HTMLParser):
             if href:
                 self.links.add(href)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP_TAGS and self._skip_depth:
             self._skip_depth -= 1
         elif tag == "title":

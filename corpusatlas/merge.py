@@ -16,7 +16,7 @@ def _enrich(first: Node, later: Node) -> Node:
     the first writer's, and extractors run in precedence order precisely so
     that hand-written data wins. Dict fields gain missing keys only; aliases
     gain missing spellings."""
-    fill = {}
+    fill: dict[str, object] = {}
     if not first.url and later.url:
         fill["url"] = later.url
     for f in ("urls", "meta"):
@@ -26,7 +26,11 @@ def _enrich(first: Node, later: Node) -> Node:
     extra = tuple(a for a in later.aliases if a not in first.aliases)
     if extra:
         fill["aliases"] = first.aliases + extra
-    return replace(first, **fill) if fill else first
+    # dataclasses.replace's stub wants literal keyword args, not an arbitrary
+    # **dict of a subset of field names — `fill` is built dynamically because
+    # which fields need filling varies per node, so this is correct at
+    # runtime but not something mypy can verify statically.
+    return replace(first, **fill) if fill else first  # type: ignore[arg-type]
 
 
 def merge(node_sets, edge_sets, live_doc_ids: set[str]):
