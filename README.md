@@ -184,6 +184,32 @@ build on its own inside a clone of this repo — swap in your own config, or
 pass `?graph=<url>` to point the viewer at any already-built `graph.json`,
 shirokoff.ca's included.)
 
+## Other formats
+
+`graph.json` stays the artifact `build` writes — it's what the browser reads
+with zero transformation, and every other format here is a converter over
+it, not a second thing the pipeline produces. `convert` never re-runs
+extraction, so it works on any `graph.json` this module ever wrote:
+
+```bash
+corpusatlas convert --graph graph.json --format graphml --out graph.graphml
+corpusatlas convert --graph graph.json --format csv --out-dir csv/
+```
+
+GraphML opens directly in Gephi, yEd, NetworkX (`nx.read_graphml`) or igraph
+— real graph analysis tools, not a browser view. The CSV pair
+(`nodes.csv`/`edges.csv`) is for reach rather than fidelity: pandas, a
+spreadsheet, anything with a CSV reader. Both keep the same lean column set —
+a node's label, type, degree and url; an edge's relation, confidence,
+explanation and scope — rather than trying to be the complete record;
+`graph.json` still is that, provenance and all.
+
+Turtle/RDF was considered and set aside: unlike these two, it isn't a
+converter over the same fields — mapping confidence and provenance onto RDF
+means picking namespaces and deciding between reification and named graphs,
+a modelling decision rather than a format choice. Worth doing if something
+needs to `SPARQL` this graph; not worth doing speculatively.
+
 ## Used by
 
 [shirokoff.ca/knowledge-base](https://shirokoff.ca/knowledge-base/) builds its

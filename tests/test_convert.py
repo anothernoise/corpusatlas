@@ -1,0 +1,122 @@
+"""Tests for the graphml and csv converters — both read a graph.json-shaped
+dict, same as the real artifact after json.loads, not the internal
+dataclasses. Node.to_json()/Edge.to_json() omit empty fields, so these
+fixtures do too, deliberately: a converter that only works when every field
+is present would fail on most real graphs, not just edge cases."""
+import csv
+import sys
+import tempfile
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from corpusatlas.csv_export import write_csv
+from corpusatlas.graphml import write_graphml
+
+GRAPH = {
+    "generated": "2026-09-19",
+    "generator": "corpusatlas 0.4.0",
+    "counts": {"nodes": 3, "edges": 2},
+    "nodes": [
+        {"id": "entity:a", "label": 'A & "the" <first>', "type": "Technology", "degree": 2,
+         "url": "https://example.org/a"},
+        {"id": "entity:b", "label": "B, comma-bearing", "type": "Concept", "degree": 1},
+        {"id": "entity:c", "label": "C", "type": "Concept", "degree": 1},
+    ],
+    "edges": [
+        {"src": "entity:a", "rel": "IMPLEMENTS", "dst": "entity:b",
+         "confidence": 0.9, "explanation": 'Cites "a source", with a comma.'},
+        {"src": "entity:a", "rel": "COMPLEMENTS", "dst": "entity:c"},
+    ],
+}
+
+
+def test_graphml_round_trips_nodes_and_edges():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.graphml"
+        write_graphml(path, GRAPH)
+        tree = ET.parse(path)
+
+    ns = "{http://graphml.graphdrawing.org/xmlns}"
+    root = tree.getroot()
+    g = root.find(f"{ns}graph")
+    nodes = g.findall(f"{ns}node")
+    edges = g.findall(f"{ns}edge")
+    assert len(nodes) == 3
+    assert len(edges) == 2
+
+    a = next(n for n in nodes if n.get("id") == "entity:a")
+    data = {d.get("key"): d.text for d in a.findall(f"{ns}data")}
+    # Special characters must survive a real XML parse, not just look right
+    # as a string — this is what an escaping bug would actually break.
+    assert data["nlabel"] == 'A & "the" <first>'
+    assert data["ntype"] == "Technology"
+    assert data["ndegree"] == "2"
+    assert data["nurl"] == "https://example.org/a"
+
+    b = next(n for n in nodes if n.get("id") == "entity:b")
+    b_data = {d.get("key"): d.text for d in b.findall(f"{ns}data")}
+    assert "nurl" not in b_data  # optional field, absent on the node -> absent in the file
+
+    a_to_b = next(e for e in edges if e.get("source") == "entity:a" and e.get("target") == "entity:b")
+    e_data = {d.get("key"): d.text for d in a_to_b.findall(f"{ns}data")}
+    assert e_data["erel"] == "IMPLEMENTS"
+    assert e_data["econfidence"] == "0.9"
+    assert e_data["eexplanation"] == 'Cites "a source", with a comma.'
+
+    a_to_c = next(e for e in edges if e.get("source") == "entity:a" and e.get("target") == "entity:c")
+    c_data = {d.get("key"): d.text for d in a_to_c.findall(f"{ns}data")}
+    assert "econfidence" not in c_data
+
+
+def test_graphml_declares_every_key_once_up_front():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "out.graphml"
+        write_graphml(path, GRAPH)
+        tree = ET.parse(path)
+    ns = "{http://graphml.graphdrawing.org/xmlns}"
+    keys = tree.getroot().findall(f"{ns}key")
+    assert {k.get("id") for k in keys} == {
+        "nlabel", "ntype", "ndegree", "nurl", "erel", "econfidence", "eexplanation", "escope",
+    }
+
+
+def test_csv_writes_a_nodes_and_edges_file_with_headers():
+    with tempfile.TemporaryDirectory() as d:
+        nodes_path, edges_path = write_csv(Path(d), GRAPH)
+        with nodes_path.open(newline="", encoding="utf-8") as f:
+            node_rows = list(csv.reader(f))
+        with edges_path.open(newline="", encoding="utf-8") as f:
+            edge_rows = list(csv.reader(f))
+
+    assert node_rows[0] == ["id", "label", "type", "degree", "url"]
+    assert len(node_rows) == 4  # header + 3 nodes
+    assert edge_rows[0] == ["src", "rel", "dst", "confidence", "explanation", "scope"]
+    assert len(edge_rows) == 3  # header + 2 edges
+
+
+def test_csv_quoting_survives_commas_and_quotes_in_real_data():
+    with tempfile.TemporaryDirectory() as d:
+        nodes_path, edges_path = write_csv(Path(d), GRAPH)
+        with nodes_path.open(newline="", encoding="utf-8") as f:
+            node_rows = {row[0]: row for row in csv.reader(f)}
+        with edges_path.open(newline="", encoding="utf-8") as f:
+            edge_rows = list(csv.reader(f))[1:]
+
+    # A naive comma-join would have split this label into two columns; the
+    # stdlib csv module quoting is what keeps it one field.
+    assert node_rows["entity:b"][1] == "B, comma-bearing"
+    a_to_b = next(r for r in edge_rows if r[0] == "entity:a" and r[2] == "entity:b")
+    assert a_to_b[4] == 'Cites "a source", with a comma.'
+
+
+def test_csv_leaves_missing_optional_fields_blank_not_absent():
+    with tempfile.TemporaryDirectory() as d:
+        _, edges_path = write_csv(Path(d), GRAPH)
+        with edges_path.open(newline="", encoding="utf-8") as f:
+            rows = {(r[0], r[2]): r for r in list(csv.reader(f))[1:]}
+    # a -> c has no confidence/explanation/scope; the row still has 6 columns.
+    row = rows[("entity:a", "entity:c")]
+    assert len(row) == 6
+    assert row[3] == "" and row[4] == "" and row[5] == ""

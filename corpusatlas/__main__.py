@@ -1,4 +1,4 @@
-"""corpusatlas CLI — build, stats, validate."""
+"""corpusatlas CLI — build, stats, validate, convert."""
 from __future__ import annotations
 
 import argparse
@@ -8,8 +8,10 @@ from pathlib import Path
 
 from . import config as cfgmod
 from .adapters import build as build_adapter
+from .csv_export import write_csv
 from .emit import write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
+from .graphml import write_graphml
 from .merge import merge
 from .ontology import CONTEXT_TYPES, NODE_TYPES, SEMANTIC_RELATIONS, TIERS
 from .resolve import Resolver
@@ -126,6 +128,26 @@ def cmd_validate(args) -> int:
     return 1 if errs else 0
 
 
+def cmd_convert(args) -> int:
+    """Reformats a built graph.json — it never re-runs extraction, so it
+    works on any graph.json this module ever produced, not just a fresh
+    build."""
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    if args.format == "graphml":
+        if not args.out:
+            print("convert --format graphml needs --out", file=sys.stderr)
+            return 1
+        write_graphml(Path(args.out), g)
+        print(f"wrote {args.out}")
+    elif args.format == "csv":
+        if not args.out_dir:
+            print("convert --format csv needs --out-dir", file=sys.stderr)
+            return 1
+        nodes_path, edges_path = write_csv(Path(args.out_dir), g)
+        print(f"wrote {nodes_path}\nwrote {edges_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="corpusatlas")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -142,6 +164,13 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("validate", help="check the graph's invariants")
     v.add_argument("--graph", required=True)
     v.set_defaults(fn=cmd_validate)
+
+    c = sub.add_parser("convert", help="reformat a built graph as GraphML or CSV")
+    c.add_argument("--graph", required=True)
+    c.add_argument("--format", choices=["graphml", "csv"], required=True)
+    c.add_argument("--out", help="output file, for --format graphml")
+    c.add_argument("--out-dir", help="output directory, for --format csv")
+    c.set_defaults(fn=cmd_convert)
 
     args = p.parse_args(argv)
     return args.fn(args)
