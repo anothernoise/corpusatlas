@@ -23,6 +23,12 @@ with no `1.0` yet reasonably can.
   the artifact; `--out` is no longer required when `--dry-run` is set.
 - `corpusatlas/py.typed` — the PEP 561 marker the `"Typing :: Typed"`
   classifier had claimed since 0.4.0 with nothing behind it.
+- `corpusatlas --version`.
+- `corpusatlas convert --format neo4j` — the same fields as the plain CSV
+  pair, under Neo4j's own `:ID`/`:LABEL`/`:START_ID`/`:END_ID`/`:TYPE`
+  header convention, so the output loads directly with `neo4j-admin
+  database import` rather than needing a column-mapping step first.
+- `CONTRIBUTING.md`, `CHANGELOG.md`, issue templates, `docs/adapters.md`.
 
 ## [0.5.0] — 2026-09-19
 

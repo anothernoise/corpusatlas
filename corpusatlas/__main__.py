@@ -14,6 +14,7 @@ from .emit import write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
 from .graphml import write_graphml
 from .merge import merge
+from .neo4j_export import write_neo4j_csv
 from .ontology import DEFAULT, Ontology, OntologyError, TIERS
 from .resolve import Resolver
 
@@ -166,6 +167,15 @@ def cmd_convert(args) -> int:
             return 1
         nodes_path, edges_path = write_csv(Path(args.out_dir), g)
         print(f"wrote {nodes_path}\nwrote {edges_path}")
+    elif args.format == "neo4j":
+        if not args.out_dir:
+            print("convert --format neo4j needs --out-dir", file=sys.stderr)
+            return 1
+        nodes_path, rels_path = write_neo4j_csv(Path(args.out_dir), g)
+        print(f"wrote {nodes_path}\nwrote {rels_path}\n\n"
+              f"Load with, e.g.:\n"
+              f"  neo4j-admin database import full --nodes={nodes_path} "
+              f"--relationships={rels_path} neo4j")
     return 0
 
 
@@ -254,9 +264,9 @@ def main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser("convert", help="reformat a built graph as GraphML or CSV")
     c.add_argument("--graph", required=True)
-    c.add_argument("--format", choices=["graphml", "csv"], required=True)
+    c.add_argument("--format", choices=["graphml", "csv", "neo4j"], required=True)
     c.add_argument("--out", help="output file, for --format graphml")
-    c.add_argument("--out-dir", help="output directory, for --format csv")
+    c.add_argument("--out-dir", help="output directory, for --format csv or neo4j")
     c.set_defaults(fn=cmd_convert)
 
     oc = sub.add_parser("ontology-check", help="validate a schema file on its own, no corpus needed")

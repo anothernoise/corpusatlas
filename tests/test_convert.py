@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from corpusatlas.csv_export import write_csv
 from corpusatlas.graphml import write_graphml
+from corpusatlas.neo4j_export import write_neo4j_csv
 
 GRAPH = {
     "generated": "2026-09-19",
@@ -120,3 +121,46 @@ def test_csv_leaves_missing_optional_fields_blank_not_absent():
     row = rows[("entity:a", "entity:c")]
     assert len(row) == 6
     assert row[3] == "" and row[4] == "" and row[5] == ""
+
+
+# --- neo4j -------------------------------------------------------------
+
+def test_neo4j_csv_uses_the_admin_import_header_convention():
+    with tempfile.TemporaryDirectory() as d:
+        nodes_path, rels_path = write_neo4j_csv(Path(d), GRAPH)
+        with nodes_path.open(newline="", encoding="utf-8") as f:
+            node_rows = list(csv.reader(f))
+        with rels_path.open(newline="", encoding="utf-8") as f:
+            rel_rows = list(csv.reader(f))
+
+    assert node_rows[0] == ["id:ID", "label", ":LABEL", "degree:int", "url"]
+    assert rel_rows[0] == [":START_ID", ":END_ID", ":TYPE", "confidence:float", "explanation", "scope"]
+    assert len(node_rows) == 4   # header + 3 nodes
+    assert len(rel_rows) == 3    # header + 2 edges
+
+
+def test_neo4j_csv_maps_type_to_label_and_rel_to_type():
+    with tempfile.TemporaryDirectory() as d:
+        nodes_path, rels_path = write_neo4j_csv(Path(d), GRAPH)
+        with nodes_path.open(newline="", encoding="utf-8") as f:
+            nodes = {row[0]: row for row in list(csv.reader(f))[1:]}
+        with rels_path.open(newline="", encoding="utf-8") as f:
+            rels = list(csv.reader(f))[1:]
+
+    assert nodes["entity:a"][2] == "Technology"  # :LABEL column, from node "type"
+    a_to_b = next(r for r in rels if r[0] == "entity:a" and r[1] == "entity:b")
+    assert a_to_b[2] == "IMPLEMENTS"  # :TYPE column, from edge "rel"
+
+
+def test_neo4j_csv_quoting_survives_commas_and_quotes_and_missing_fields():
+    with tempfile.TemporaryDirectory() as d:
+        nodes_path, rels_path = write_neo4j_csv(Path(d), GRAPH)
+        with nodes_path.open(newline="", encoding="utf-8") as f:
+            nodes = {row[0]: row for row in list(csv.reader(f))[1:]}
+        with rels_path.open(newline="", encoding="utf-8") as f:
+            rels = list(csv.reader(f))[1:]
+
+    assert nodes["entity:b"][1] == "B, comma-bearing"
+    a_to_c = next(r for r in rels if r[0] == "entity:a" and r[1] == "entity:c")
+    assert a_to_c[2] == "COMPLEMENTS"
+    assert a_to_c[3] == ""  # no confidence on this edge — blank, not "None"

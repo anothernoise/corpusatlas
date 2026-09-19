@@ -233,15 +233,20 @@ extraction, so it works on any `graph.json` this module ever wrote:
 ```bash
 corpusatlas convert --graph graph.json --format graphml --out graph.graphml
 corpusatlas convert --graph graph.json --format csv --out-dir csv/
+corpusatlas convert --graph graph.json --format neo4j --out-dir neo4j/
 ```
 
 GraphML opens directly in Gephi, yEd, NetworkX (`nx.read_graphml`) or igraph
 — real graph analysis tools, not a browser view. The CSV pair
 (`nodes.csv`/`edges.csv`) is for reach rather than fidelity: pandas, a
-spreadsheet, anything with a CSV reader. Both keep the same lean column set —
-a node's label, type, degree and url; an edge's relation, confidence,
-explanation and scope — rather than trying to be the complete record;
-`graph.json` still is that, provenance and all.
+spreadsheet, anything with a CSV reader. `neo4j` writes the same fields under
+Neo4j's own `:ID`/`:LABEL`/`:START_ID`/`:END_ID`/`:TYPE` header convention —
+loads directly with `neo4j-admin database import full`, no column-mapping
+step first; a node's `type` becomes its Neo4j label, an edge's `rel` becomes
+its relationship type. All three keep the same lean column set — a node's
+label, type, degree and url; an edge's relation, confidence, explanation and
+scope — rather than trying to be the complete record; `graph.json` still is
+that, provenance and all.
 
 Turtle/RDF was considered and set aside: unlike these two, it isn't a
 converter over the same fields — mapping confidence and provenance onto RDF
