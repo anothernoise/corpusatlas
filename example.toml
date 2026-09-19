@@ -20,6 +20,17 @@ type     = "entity_packs"
 path     = "entities"
 url_base = "/knowledge-base/entities/"
 
+# An Obsidian vault: [[wikilinks]] resolve to REFERENCES edges and #tags (or
+# a tags: frontmatter list) to ABOUT edges, with no extra config — the
+# deterministic tier already knows what to do with a Document's links and
+# tags. See corpusatlas/adapters/obsidian.py for the frontmatter subset it
+# understands and what it doesn't.
+# [[sources]]
+# type      = "obsidian"
+# path      = "../my-vault"
+# url_base  = "/vault/"    # notes aren't usually published; this is synthetic
+# recursive = true         # false to ignore subfolders
+
 # For a corpus that isn't a local checkout: a plain list of URLs, fetched at
 # build time. Real network I/O, unlike every other adapter here — a build
 # using this is only as reproducible as the pages it fetches, and fails if
