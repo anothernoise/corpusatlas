@@ -22,32 +22,70 @@ PAGES = {
         <a href="https://example.org/elsewhere">something external</a>.</p>
         <footer>copyright nobody</footer></body></html>""",
     "/b": b"<html><head><title>Page B</title></head><body><p>Referenced by A.</p></body></html>",
+    "/private": b"<html><head><title>Private</title></head><body>shh</body></html>",
 }
 
 _SLOW_PATH = re.compile(r"^/slow/(\d+)$")
 SLOW_DELAY = 0.2  # seconds each /slow/<n> page takes to respond
 
+# Mutable test fixtures, reset by each test that uses them — module-level
+# because the handler class is instantiated fresh per request by
+# http.server, with no other way to hand it per-test configuration.
+ROBOTS_TXT: dict[str, bytes | None] = {"body": None}   # None -> 404, i.e. "no robots.txt"
+FLAKY_REMAINING: dict[str, int] = {}                   # path -> failures left before a 200
+
 
 class _Handler(BaseHTTPRequestHandler):
+    # HTTP/1.0 (the base class default) closes the connection after every
+    # response regardless of what the client sends — testing that the
+    # client-side connection pool reuses a socket needs a server that can
+    # actually keep one open, which needs both HTTP/1.1 and a Content-Length
+    # on every response (keep-alive has no other way to know where a body
+    # ends, with no chunked encoding here).
+    protocol_version = "HTTP/1.1"
+    connection_count = 0
+
+    def setup(self):
+        _Handler.connection_count += 1
+        super().setup()
+
+    def _send(self, status, body=b"", content_type="text/html; charset=utf-8", headers=None):
+        self.send_response(status)
+        if body:
+            self.send_header("Content-Type", content_type)
+        # Always, even for an empty body: HTTP/1.1 keep-alive has no other
+        # way to know where one response ends and the next begins, with no
+        # chunked encoding here.
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
     def do_GET(self):
+        if self.path == "/robots.txt":
+            body = ROBOTS_TXT["body"]
+            self._send(200, body, "text/plain") if body is not None else self._send(404)
+            return
+        if self.path == "/redirect":
+            self._send(301, headers={"Location": "/a"})
+            return
+        if self.path in FLAKY_REMAINING:
+            if FLAKY_REMAINING[self.path] > 0:
+                FLAKY_REMAINING[self.path] -= 1
+                self._send(503)
+                return
+            self._send(200, b"<html><head><title>Flaky</title></head><body>ok</body></html>")
+            return
         m = _SLOW_PATH.match(self.path)
         if m:
             time.sleep(SLOW_DELAY)
             body = f"<html><head><title>Slow {m.group(1)}</title></head><body></body></html>".encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(body)
+            self._send(200, body)
             return
         body = PAGES.get(self.path)
-        if body is None:
-            self.send_response(404)
-            self.end_headers()
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(200, body) if body is not None else self._send(404)
 
     def log_message(self, *a):
         pass  # keep test output quiet
@@ -58,6 +96,9 @@ def _serve():
     # serialise even concurrent client requests, which would defeat the
     # point of the concurrency test below — the bottleneck has to be able
     # to move to the client side for that test to mean anything.
+    ROBOTS_TXT["body"] = None
+    FLAKY_REMAINING.clear()
+    _Handler.connection_count = 0
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -173,3 +214,112 @@ def test_max_workers_is_configurable():
     assert len(docs) == 4
     # max_workers=1 is effectively the old serial behaviour.
     assert elapsed >= SLOW_DELAY * 3.5
+
+
+# --- connection reuse, retries, robots.txt, redirects, dedup --------------
+
+def test_persistent_connections_are_reused_not_reopened_per_request():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        urls = [f"{base}/a", f"{base}/b", f"{base}/private",
+               f"{base}/slow/0", f"{base}/slow/1", f"{base}/slow/2"]
+        docs = list(WebAdapter(urls=urls, max_workers=2, respect_robots=False).documents())
+    finally:
+        connections = _Handler.connection_count
+        server.shutdown()
+
+    assert len(docs) == 6
+    # 2 workers, each keeping one persistent connection open across its
+    # several fetches: nowhere near one connection per request (6).
+    assert connections <= 3, f"{connections} connections for 6 requests — reuse doesn't look like it's working"
+
+
+def test_retries_a_transient_failure_and_succeeds():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        FLAKY_REMAINING["/flaky"] = 2  # 503 twice, then 200
+        docs = list(WebAdapter(urls=[f"{base}/flaky"], max_retries=2,
+                               retry_backoff=0.01, respect_robots=False).documents())
+    finally:
+        server.shutdown()
+
+    assert [d.id for d in docs] == ["flaky"]
+    assert docs[0].title == "Flaky"
+
+
+def test_retries_exhausted_still_skips_gracefully():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        FLAKY_REMAINING["/flaky2"] = 5  # more failures than retries allow
+        docs = list(WebAdapter(urls=[f"{base}/a", f"{base}/flaky2"], max_retries=1,
+                               retry_backoff=0.01, respect_robots=False).documents())
+    finally:
+        server.shutdown()
+
+    assert [d.id for d in docs] == ["a"]  # flaky2 gave up, but didn't take "a" down with it
+
+
+def test_robots_txt_disallow_skips_a_url():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        ROBOTS_TXT["body"] = b"User-agent: *\nDisallow: /private\n"
+        docs = list(WebAdapter(urls=[f"{base}/a", f"{base}/private"]).documents())
+    finally:
+        server.shutdown()
+
+    assert [d.id for d in docs] == ["a"]
+
+
+def test_respect_robots_false_bypasses_the_check():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        ROBOTS_TXT["body"] = b"User-agent: *\nDisallow: /private\n"
+        docs = list(WebAdapter(urls=[f"{base}/a", f"{base}/private"],
+                               respect_robots=False).documents())
+    finally:
+        server.shutdown()
+
+    assert {d.id for d in docs} == {"a", "private"}
+
+
+def test_a_missing_robots_txt_is_treated_as_allow_everything():
+    server = _serve()  # ROBOTS_TXT["body"] is None -> 404
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        docs = list(WebAdapter(urls=[f"{base}/a"]).documents())
+    finally:
+        server.shutdown()
+    assert [d.id for d in docs] == ["a"]
+
+
+def test_redirects_are_followed_transparently():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        docs = list(WebAdapter(urls=[f"{base}/redirect"], respect_robots=False).documents())
+    finally:
+        server.shutdown()
+
+    # Identity follows the configured url (/redirect); content follows
+    # wherever it actually redirected to (/a's title).
+    assert [d.id for d in docs] == ["redirect"]
+    assert docs[0].title == "Page A"
+
+
+def test_urls_that_normalize_to_the_same_page_are_deduplicated():
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        adapter = WebAdapter(urls=[f"{base}/a", f"{base}/a/", f"{base}/a#section"],
+                             respect_robots=False)
+        assert adapter.urls == [f"{base}/a"]  # deduped at construction time
+        docs = list(adapter.documents())
+    finally:
+        server.shutdown()
+
+    assert [d.id for d in docs] == ["a"]
