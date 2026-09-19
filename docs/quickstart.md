@@ -7,7 +7,7 @@ empty directory.
 ## 1. Install
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.6.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.7.0
 ```
 
 No third-party dependencies, so this is the whole install.

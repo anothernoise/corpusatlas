@@ -4,6 +4,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.7.0] — 2026-09-19
+
+### Added
+- **`build --cache PATH`** — an opt-in on-disk cache that skips re-parsing
+  an unchanged file in the `html_blog`, `obsidian` or `logseq` adapters.
+  Scoped to file-parsing only, never extraction: a source's whole file-set
+  fingerprint has to match exactly, or every file in it reparses, not just
+  the ones that look different — coarse on purpose, so a stale cache can
+  never silently miss a case where one file's change should affect another
+  (a new note a dangling wikilink now resolves to, a re-tagged index page).
+  See `corpusatlas/cache.py` and `docs/DESIGN.md`.
+- **Plugin adapters.** `adapters.build()` now falls back to the
+  `corpusatlas.adapters` entry-point group for a source `type` it doesn't
+  recognise, so a third-party package (a Notion export, an RSS feed,
+  Confluence) can register an adapter without forking this repo. The seven
+  built-in names can never be shadowed by one. See `docs/adapters.md`.
+- **`corpusatlas convert --format turtle`** — Turtle/RDF export, previously
+  set aside as a modelling decision rather than a reformat. Nodes become
+  resources under a configurable `--base`; an edge's relation is the
+  predicate directly; confidence/explanation/scope/provenance ride on a
+  standard `rdf:Statement` reification alongside the plain triple. See
+  `corpusatlas/rdf_export.py` for the full reasoning.
+- **`corpusatlas registry-check --entities entities.toml`** — validates an
+  entity registry alone (duplicate ids, types not in the ontology), no
+  corpus needed, the registry-side counterpart to `ontology-check`.
+- **Concurrent fetching in the `web` adapter** (`max_workers`, default 8,
+  stdlib `ThreadPoolExecutor`) — the only adapter that touches the network
+  was also the only one paying for it serially. Output still yields in
+  `urls`' own configured order regardless of fetch completion order.
+- **`schema_version`** in `graph.json` (currently `1`) — lets a consumer
+  detect an artifact-shape change independent of the package version that
+  wrote it. `corpusatlas validate` warns, rather than fails, on a graph
+  newer than the build understands.
+- **`docs/quickstart.md`** — install through a rendered graph in about five
+  minutes, verified end to end rather than hand-typed.
+- **Viewer:** a label search box and click-to-focus — dims everything
+  outside the selected node's neighbourhood, pans the camera there, and
+  makes the card's own neighbour list clickable to refocus.
+- **mypy in CI**, one matrix combination (like the coverage gate) — the
+  `py.typed` marker and `"Typing :: Typed"` classifier had nothing actually
+  enforcing them until now.
+- Performance regression tests (`tests/test_perf.py`): a synthetic
+  400-document build stays inside a generous time ceiling, and a `--cache`
+  warm rebuild is meaningfully faster than a cold one.
+
+### Fixed
+- `README.md`'s install command was still pinned to `@v0.5.0` after the
+  0.6.0 release.
+- A handful of real type-annotation gaps mypy's first run surfaced (a wrong
+  tuple element type in the mentions extractor's compiled-pattern cache, an
+  unannotated dict in `model.py`); everything else is a documented
+  `type: ignore` on two dynamic-dict-splat patterns mypy's stubs can't
+  express statically.
+
 ## [0.6.0] — 2026-09-19
 
 ### Added

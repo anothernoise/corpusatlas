@@ -45,7 +45,7 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.6.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.7.0
 
 corpusatlas init --dir my-corpus    # a starter config + entity registry
 # edit my-corpus/corpusatlas.toml to point `path` at your notes, then:
