@@ -81,6 +81,51 @@ schema   = "ontology.toml"   # the file above: the types and relations themselve
 `schema` is optional — omit it and a build uses `DEFAULT`, exactly as it did
 before this existed.
 
+## Adding to DEFAULT instead of replacing it
+
+Most of the time a schema isn't a whole new domain — it's DEFAULT plus a
+handful of types someone's own corpus needs. Redeclaring all 14 entity types
+and 25 relations to add three is exactly the busywork a schema file should
+save you from, so there are two ways not to:
+
+**In Python**, `Ontology.extend()` returns a new ontology with more types and
+relations layered on top of an existing one:
+
+```python
+from corpusatlas.ontology import DEFAULT
+
+mine = DEFAULT.extend(
+    entity_types=("Ingredient",),
+    relations={"USES_INGREDIENT": (frozenset({"Technology"}), frozenset({"Ingredient"}))},
+    relation_groups={"Cooking": ("USES_INGREDIENT",)},
+)
+```
+
+`relation_groups` merges into an existing group by name (`"Structure"` here
+would add to DEFAULT's existing `Structure` group, not replace it); every
+other field is additive the same way. A name that already exists in the base
+ontology — a type or a relation — raises `OntologyError` rather than
+silently overwriting it, the same "fail loud on a conflict" rule
+`extract/packs.py` already applies to a redeclared entity type.
+
+**In a schema file**, `extends = "default"` does the same thing without
+Python — everything else in the file is layered onto `DEFAULT` instead of
+replacing it wholesale:
+
+```toml
+extends = "default"
+entity_types = ["Ingredient"]
+
+[[relation]]
+name   = "USES_INGREDIENT"
+source = ["Technology"]
+target = ["Ingredient"]
+group  = "Cooking"
+```
+
+`"default"` is the only recognised value today — there's nothing else built
+in yet to extend from.
+
 ## What gets checked, and when
 
 `Ontology.from_toml()` runs the same closed-world checks `DEFAULT` itself has

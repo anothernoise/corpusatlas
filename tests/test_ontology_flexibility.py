@@ -237,3 +237,73 @@ def test_cmd_validate_accepts_an_artifact_built_from_a_custom_ontology():
         class Args:
             graph = str(out)
         assert cmd_validate(Args()) == 0
+
+
+# --- Ontology.extend() ---------------------------------------------------
+
+def test_extend_adds_types_and_relations_without_disturbing_the_original():
+    extended = DEFAULT.extend(
+        entity_types=("Ingredient",),
+        relations={"USES_INGREDIENT": (frozenset({"Technology"}), frozenset({"Ingredient"}))},
+        relation_groups={"Cooking": ("USES_INGREDIENT",)},
+    )
+    assert "Ingredient" not in DEFAULT.entity_types  # original untouched
+    assert "Ingredient" in extended.entity_types
+    assert extended.typecheck("USES_INGREDIENT", "Technology", "Ingredient")
+    assert extended.typecheck("IMPLEMENTS", "Technology", "Concept")  # DEFAULT's own relations still work
+
+
+def test_extend_refuses_to_silently_redeclare_an_existing_type():
+    try:
+        DEFAULT.extend(entity_types=("Technology",))
+    except OntologyError as e:
+        assert "Technology" in str(e)
+        return
+    raise AssertionError("expected OntologyError")
+
+
+def test_extend_refuses_to_silently_redeclare_an_existing_relation():
+    try:
+        DEFAULT.extend(relations={"IMPLEMENTS": (frozenset({"Concept"}), frozenset({"Concept"}))})
+    except OntologyError as e:
+        assert "IMPLEMENTS" in str(e)
+        return
+    raise AssertionError("expected OntologyError")
+
+
+def test_extend_can_add_a_relation_to_an_existing_group():
+    extended = DEFAULT.extend(
+        entity_types=("Ingredient",),
+        relations={"USES_INGREDIENT": (frozenset({"Technology"}), frozenset({"Ingredient"}))},
+        relation_groups={"Structure": ("USES_INGREDIENT",)},  # Structure already exists in DEFAULT
+    )
+    assert "USES_INGREDIENT" in extended.relation_groups["Structure"]
+    assert "HAS_COMPONENT" in extended.relation_groups["Structure"]  # DEFAULT's own members still there
+
+
+def test_from_toml_with_extends_default_layers_onto_the_built_in_ontology():
+    toml_text = textwrap.dedent("""
+        extends = "default"
+        entity_types = ["Ingredient"]
+
+        [[relation]]
+        name   = "USES_INGREDIENT"
+        source = ["Technology"]
+        target = ["Ingredient"]
+        group  = "Cooking"
+    """)
+    o = Ontology.from_toml(write_toml(toml_text))
+    assert "Technology" in o.entity_types  # inherited from DEFAULT
+    assert "Ingredient" in o.entity_types  # added
+    assert o.typecheck("IMPLEMENTS", "Technology", "Concept")  # DEFAULT relation
+    assert o.typecheck("USES_INGREDIENT", "Technology", "Ingredient")  # new relation
+
+
+def test_from_toml_rejects_an_unrecognised_extends_value():
+    toml_text = 'extends = "something-else"\nentity_types = ["X"]\n'
+    try:
+        Ontology.from_toml(write_toml(toml_text))
+    except OntologyError as e:
+        assert "something-else" in str(e)
+        return
+    raise AssertionError("expected OntologyError")

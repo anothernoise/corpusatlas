@@ -43,13 +43,24 @@ No third-party dependencies. Python 3.11+.
 ```bash
 pip install git+https://github.com/anothernoise/corpusatlas@v0.5.0
 
-corpusatlas build --config your-corpus.toml --out graph.json
+corpusatlas init --dir my-corpus    # a starter config + entity registry
+# edit my-corpus/corpusatlas.toml to point `path` at your notes, then:
+corpusatlas build --config my-corpus/corpusatlas.toml --out graph.json --dry-run   # counts, nothing written
+corpusatlas build --config my-corpus/corpusatlas.toml --out graph.json
 corpusatlas stats    --graph graph.json
 corpusatlas validate --graph graph.json
 ```
 
-`example.toml` shows the config shape but points at a real corpus's
-directories, so it isn't runnable as-is — see Configuration below.
+`init` scaffolds an `obsidian` source by default — point it at any directory
+of markdown and it runs immediately, wikilinks or not. `example.toml` (below)
+shows every adapter's shape but points at a real corpus's own directories, so
+it isn't runnable as-is the way `init`'s output is.
+
+Iterating on a custom ontology doesn't need a corpus at all:
+
+```bash
+corpusatlas ontology-check --schema ontology.toml
+```
 
 Working on the module itself:
 

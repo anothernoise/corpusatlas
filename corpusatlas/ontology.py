@@ -146,17 +146,65 @@ class Ontology:
             problems.append(f"confidence {confidence!r} is not a number between 0 and 1")
         return problems
 
+    def extend(self, *, entity_types=(), context_types=(),
+              relations: dict[str, tuple[frozenset, frozenset]] | None = None,
+              inverse: dict[str, str] | None = None,
+              relation_groups: dict[str, tuple[str, ...]] | None = None,
+              context_relations=(), symmetric=()) -> "Ontology":
+        """A new Ontology with more types and relations layered on top of
+        this one — for "DEFAULT plus three new types" rather than
+        redeclaring an entire 14-type, 25-relation vocabulary to add three
+        things to it. Every name here must be new: extending with a type or
+        relation this ontology already has raises OntologyError rather than
+        silently overwriting it — the same "fail loud on a conflict" rule
+        packs.py already applies to a type redeclared with a different
+        signature.
+        """
+        relations = relations or {}
+        inverse = inverse or {}
+        relation_groups = relation_groups or {}
+
+        dup_types = (set(entity_types) | set(context_types)) & self.node_types
+        if dup_types:
+            raise OntologyError(f"extend: type(s) already declared: {sorted(dup_types)}")
+        dup_rels = set(relations) & set(self.relations)
+        if dup_rels:
+            raise OntologyError(f"extend: relation(s) already declared: {sorted(dup_rels)}")
+
+        merged_groups = {g: list(rs) for g, rs in self.relation_groups.items()}
+        for g, rs in relation_groups.items():
+            merged_groups.setdefault(g, [])
+            merged_groups[g].extend(rs)
+
+        return Ontology(
+            entity_types=self.entity_types | frozenset(entity_types),
+            context_types=self.context_types | frozenset(context_types),
+            relations={**self.relations, **relations},
+            inverse={**self.inverse, **inverse},
+            relation_groups={g: tuple(rs) for g, rs in merged_groups.items()},
+            context_relations=self.context_relations + tuple(context_relations),
+            symmetric=self.symmetric | frozenset(symmetric),
+        )
+
     @classmethod
     def from_toml(cls, path: str | Path) -> "Ontology":
         """A schema file: entity_types, context_types, and one [[relation]]
         table per relation — its signature, and whether it's a canvas filter
         (assigned to a `group`) or a card context relation (`context = true`).
         See docs/ontology-schema.md for the full shape and a worked example.
+
+        `extends = "default"` at the top of the file means everything below
+        is layered onto DEFAULT via :meth:`extend` rather than replacing it
+        wholesale — "DEFAULT plus a few more types" as a schema file instead
+        of a Python script. Only "default" is a recognised value today.
         """
         doc = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        extends = doc.get("extends")
+        if extends is not None and extends != "default":
+            raise OntologyError(f"{path}: extends {extends!r} is not recognised (only \"default\" is)")
         entity_types = frozenset(doc.get("entity_types") or ())
         context_types = frozenset(doc.get("context_types") or ())
-        if not entity_types:
+        if not entity_types and not extends:
             raise OntologyError(f"{path}: entity_types is empty or missing")
 
         relations: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
@@ -187,7 +235,7 @@ class Ontology:
             if r.get("inverse"):
                 inverse[r["inverse"]] = name
 
-        return cls(
+        kwargs = dict(
             entity_types=entity_types,
             context_types=context_types,
             relations=relations,
@@ -196,6 +244,9 @@ class Ontology:
             context_relations=tuple(context_relations),
             symmetric=frozenset(symmetric),
         )
+        if extends == "default":
+            return DEFAULT.extend(**kwargs)
+        return cls(**kwargs)
 
 
 TECH_LIKE = frozenset({"Technology", "Component", "Product", "CloudService", "Language", "API",
