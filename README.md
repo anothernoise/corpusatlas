@@ -13,7 +13,8 @@ a few hundred to a few thousand documents, where the whole graph fits in a
 browser tab and a graph database would be an operational cost with no payoff.
 [docs/DESIGN.md](docs/DESIGN.md) has the reasoning condensed for this repo —
 the size table, why entity resolution is the real work, and what's actually
-flexible here versus fixed on purpose.
+flexible here versus fixed on purpose. New here? [docs/quickstart.md](docs/quickstart.md)
+gets a graph out of a handful of throwaway notes in about five minutes.
 
 ## The contract
 
@@ -29,7 +30,9 @@ Two rules keep this a module rather than a framework:
    list of URLs (`web`) for a corpus that isn't a local checkout at all — see
    `corpusatlas/adapters/` for what each one honestly does and doesn't
    extract. A new source is a class with one `documents()` method; the
-   existing seven are the reference for the shape.
+   existing seven are the reference for the shape — copy one, or ship yours
+   as a separate installed package via the `corpusatlas.adapters` entry-point
+   group (see [docs/adapters.md](docs/adapters.md)) without forking this repo.
 2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 
@@ -57,11 +60,17 @@ of markdown and it runs immediately, wikilinks or not. `example.toml` (below)
 shows every adapter's shape but points at a real corpus's own directories, so
 it isn't runnable as-is the way `init`'s output is.
 
-Iterating on a custom ontology doesn't need a corpus at all:
+Iterating on a custom ontology or a registry doesn't need a corpus at all:
 
 ```bash
 corpusatlas ontology-check --schema ontology.toml
+corpusatlas registry-check --entities entities.toml
 ```
+
+On a large corpus, `build --cache .corpusatlas_cache.json` skips re-parsing
+any `html_blog`/`obsidian`/`logseq` file whose content hasn't changed since
+the last build at that cache path — opt-in, and never changes what gets
+built, only how long it takes.
 
 Working on the module itself:
 

@@ -8,12 +8,23 @@
   html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9;
     font: 14px/1.4 -apple-system, system-ui, sans-serif; }
   #stage { position: absolute; inset: 0; }
-  #hud { position: absolute; top: 12px; left: 12px; max-width: 320px;
+  #hud { position: absolute; top: 12px; left: 12px; width: 260px;
     background: rgba(13,17,23,0.85); border: 1px solid #30363d; border-radius: 8px;
     padding: 10px 14px; }
   #hud p { margin: 4px 0; }
+  #search { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 5px 8px;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; font: inherit; }
+  #search:focus { outline: 1px solid #58a6ff; }
+  #searchResults { list-style: none; margin: 4px 0 0; padding: 0; max-height: 160px;
+    overflow-y: auto; border-radius: 6px; overflow-x: hidden; }
+  #searchResults li { padding: 4px 8px; font-size: 12.5px; cursor: pointer;
+    border-top: 1px solid #21262d; }
+  #searchResults li:first-child { border-top: none; }
+  #searchResults li:hover { background: #21262d; }
   #legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
-  #legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+  #legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+    cursor: pointer; }
   #legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   #card { position: absolute; top: 12px; right: 12px; width: 280px; max-height: 80vh;
     overflow-y: auto; background: rgba(13,17,23,0.92); border: 1px solid #30363d;
@@ -21,8 +32,9 @@
   #card h3 { margin: 0 0 4px; font-size: 15px; }
   #card .type { color: #8b949e; font-size: 12px; margin-bottom: 8px; }
   #card ul { list-style: none; margin: 0; padding: 0; }
-  #card li { padding: 3px 0; border-top: 1px solid #21262d; font-size: 12.5px; }
+  #card li { padding: 3px 0; border-top: 1px solid #21262d; font-size: 12.5px; cursor: pointer; }
   #card li:first-child { border-top: none; }
+  #card li:hover { color: #58a6ff; }
   a { color: #58a6ff; }
 </style>
 </head>
@@ -31,6 +43,8 @@
 <div id="hud">
   <p><strong>corpusatlas</strong> — reference viewer</p>
   <p id="status">loading…</p>
+  <input id="search" type="search" placeholder="Find a node… (Esc to clear)" disabled>
+  <ul id="searchResults" hidden></ul>
   <div id="legend"></div>
 </div>
 <div id="card"></div>
@@ -48,6 +62,10 @@
 // renderer this was pulled from (shirokoff.ca/knowledge-base) is ~1900 lines
 // for exactly those features — deliberately not reproduced here, because
 // they were tuned for one specific graph's shape, not written to be generic.
+// Label search and click-to-focus (dim everything but the selected node's
+// neighbourhood, pan the camera there) are the one interaction this file
+// does carry, since "find a node in a 1,000-node hairball" is a need every
+// graph this renders will have, not something specific to one shape.
 // Copy this file and grow it; it isn't meant to stay this small forever.
 //
 // Assumes graph.json sits next to this file — override with ?graph=<url>.
@@ -59,6 +77,8 @@ const Sigma = window.Sigma.Sigma || window.Sigma;
 const statusEl = document.getElementById('status');
 const legendEl = document.getElementById('legend');
 const cardEl = document.getElementById('card');
+const searchEl = document.getElementById('search');
+const resultsEl = document.getElementById('searchResults');
 
 const params = new URLSearchParams(location.search);
 const graphUrl = params.get('graph') || './graph.json';
@@ -128,19 +148,81 @@ const renderer = new Sigma(g, document.getElementById('stage'), {
   defaultDrawNodeHover: true,
 });
 
-renderer.on('clickNode', ({ node }) => {
-  const n = g.getNodeAttribute(node, 'meta');
-  const neighbours = g.neighbors(node).map((id) => g.getNodeAttribute(id, 'label'));
+// The one piece of interaction state this file has: which node (if any) is
+// focused. The two reducers below are how Sigma dims everything outside its
+// neighbourhood without touching the graph's own stored node/edge data.
+let focusedNode = null;
+
+renderer.setSetting('nodeReducer', (node, attrs) => {
+  if (!focusedNode || node === focusedNode || g.areNeighbors(node, focusedNode)) return attrs;
+  return { ...attrs, label: '', color: '#21262d', zIndex: 0 };
+});
+renderer.setSetting('edgeReducer', (edge, attrs) => {
+  if (!focusedNode) return attrs;
+  const [s, t] = g.extremities(edge);
+  if (s === focusedNode || t === focusedNode) return attrs;
+  return { ...attrs, color: 'rgba(48,54,61,0.12)' };
+});
+
+function focusNode(id) {
+  focusedNode = id;
+  renderer.refresh();
+
+  const n = g.getNodeAttribute(id, 'meta');
+  const neighbours = g.neighbors(id)
+    .map((nid) => ({ id: nid, label: g.getNodeAttribute(nid, 'label') }))
+    .sort((a, b) => a.label.localeCompare(b.label));
   cardEl.style.display = 'block';
   cardEl.innerHTML = `
     <h3>${n.label}</h3>
     <div class="type">${n.type} · degree ${n.degree || 0}</div>
     ${n.url ? `<p><a href="${n.url}" target="_blank" rel="noopener">source →</a></p>` : ''}
-    <ul>${neighbours.slice(0, 25).map((l) => `<li>${l}</li>`).join('')}</ul>
+    <ul>${neighbours.slice(0, 25).map((nb) => `<li data-node="${nb.id}">${nb.label}</li>`).join('')}</ul>
     ${neighbours.length > 25 ? `<p>+${neighbours.length - 25} more</p>` : ''}
   `;
+  // A neighbour in the card is itself a node in the graph — clicking it
+  // refocuses there instead of making the reader find it by eye.
+  for (const li of cardEl.querySelectorAll('li[data-node]')) {
+    li.addEventListener('click', () => focusNode(li.dataset.node));
+  }
+
+  const pos = renderer.getNodeDisplayData(id);
+  if (pos) renderer.getCamera().animate({ x: pos.x, y: pos.y }, { duration: 300 });
+}
+
+function clearFocus() {
+  focusedNode = null;
+  renderer.refresh();
+  cardEl.style.display = 'none';
+  searchEl.value = '';
+  resultsEl.hidden = true;
+  resultsEl.innerHTML = '';
+}
+
+renderer.on('clickNode', ({ node }) => focusNode(node));
+renderer.on('clickStage', clearFocus);
+
+searchEl.disabled = false;
+searchEl.addEventListener('input', () => {
+  const q = searchEl.value.trim().toLowerCase();
+  resultsEl.innerHTML = '';
+  if (!q) { resultsEl.hidden = true; return; }
+  const matches = nodes.filter((n) => n.label.toLowerCase().includes(q)).slice(0, 8);
+  resultsEl.hidden = matches.length === 0;
+  for (const m of matches) {
+    const li = document.createElement('li');
+    li.textContent = `${m.label} (${m.type})`;
+    li.addEventListener('click', () => {
+      focusNode(m.id);
+      searchEl.value = m.label;
+      resultsEl.hidden = true;
+    });
+    resultsEl.appendChild(li);
+  }
 });
-renderer.on('clickStage', () => { cardEl.style.display = 'none'; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') clearFocus();
+});
 
 for (const type of [...entityTypes].sort()) {
   const span = document.createElement('span');
@@ -149,7 +231,7 @@ for (const type of [...entityTypes].sort()) {
 }
 
 statusEl.textContent = `${nodes.length} entities · ${edges.length - dupes} relationships` +
-  (data.generated ? ` · built ${data.generated}` : '');
+  (data.generated ? ` · built ${data.generated}` : '') + ' · click a node, or search above';
 </script>
 </body>
 </html>
