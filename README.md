@@ -261,6 +261,12 @@ the corpus, the config and the entity registry; this repo holds the engine.
 It grew inside that site's repository and was split out with
 `git subtree split`, so the history below predates this repository.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). [CHANGELOG.md](CHANGELOG.md) has the
+version history; [docs/adapters.md](docs/adapters.md) lists all six sources
+side by side.
+
 ## Licence
 
 MIT.

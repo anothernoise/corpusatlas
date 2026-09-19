@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import __version__
 from . import config as cfgmod
 from .adapters import build as build_adapter
 from .csv_export import write_csv
@@ -233,6 +234,7 @@ def cmd_init(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="corpusatlas")
+    p.add_argument("--version", action="version", version=f"corpusatlas {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     b = sub.add_parser("build", help="build the graph from a config")

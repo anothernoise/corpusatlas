@@ -121,3 +121,19 @@ def test_build_without_out_or_dry_run_fails_cleanly_not_a_crash():
         (root / "notes").mkdir()
         rc = main(["build", "--config", str(root / "corpusatlas.toml")])
         assert rc == 1
+
+
+def test_version_flag_is_wired_and_matches_the_package():
+    import io
+    import contextlib
+    from corpusatlas import __version__
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        try:
+            main(["--version"])
+        except SystemExit as e:
+            assert e.code == 0
+        else:
+            raise AssertionError("--version should exit")
+    assert __version__ in out.getvalue()
