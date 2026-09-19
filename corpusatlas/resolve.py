@@ -10,7 +10,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from .ontology import ENTITY_PREFIX, ENTITY_TYPES
+from .ontology import DEFAULT, ENTITY_PREFIX, Ontology
 
 
 def slug(s: str) -> str:
@@ -47,7 +47,7 @@ class Resolver:
                 human said so; most tags are subjects, not entities.
     """
 
-    def __init__(self, entities=()):
+    def __init__(self, entities=(), ontology: Ontology = DEFAULT):
         self._entities: dict[str, dict] = {}
         self._by_name: dict[str, str] = {}
         self._by_option: dict[str, list[str]] = {}
@@ -58,7 +58,7 @@ class Resolver:
             eid = entity_id(e["id"])
             if eid in self._entities:
                 raise RegistryError(f"duplicate entity id {e['id']}")
-            if e.get("type") not in ENTITY_TYPES:
+            if e.get("type") not in ontology.entity_types:
                 raise RegistryError(f"{e['id']}: type {e.get('type')!r} is not an entity type")
             self._entities[eid] = e
             for form in (e["id"], e["name"], *e.get("aliases", ())):
@@ -71,12 +71,12 @@ class Resolver:
                 self._by_tag.setdefault(t, []).append(eid)
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "Resolver":
+    def from_config(cls, cfg: dict, ontology: Ontology = DEFAULT) -> "Resolver":
         path = (cfg.get("ontology") or {}).get("entities")
         if not path:
-            return cls()
+            return cls(ontology=ontology)
         doc = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(doc.get("entity", []))
+        return cls(doc.get("entity", []), ontology=ontology)
 
     def resolve(self, raw: str, kind: str = "name") -> list[str]:
         if kind == "option":

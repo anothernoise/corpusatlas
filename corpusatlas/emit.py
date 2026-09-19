@@ -6,10 +6,11 @@ from datetime import date
 from pathlib import Path
 
 from . import __version__
-from .ontology import CONTEXT_RELATIONS, ENTITY_TYPES, INVERSE_LABEL, RELATION_GROUPS
+from .ontology import DEFAULT, Ontology
 
 
-def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str]) -> dict:
+def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str],
+               ontology: Ontology = DEFAULT) -> dict:
     degree: dict[str, int] = {}
     for e in edges:
         degree[e.src] = degree.get(e.src, 0) + 1
@@ -23,16 +24,20 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str]) -> 
         "counts": {"nodes": len(nodes), "edges": len(edges)},
         # What a renderer needs to draw this graph without hard-coding the
         # ontology: which node types are entities (drawn) as opposed to
-        # context (linked from a card), how to label a relation read from
+        # context (linked from a card) — the two together are every node
+        # type this graph can contain — how to label a relation read from
         # its target end, and the canvas filter groups — only those with
         # something in them, so a reader never sees a filter for a relation
-        # this graph does not contain.
-        "entity_types": sorted(ENTITY_TYPES),
-        "inverse_labels": INVERSE_LABEL,
+        # this graph does not contain. Also what `corpusatlas validate`
+        # checks an artifact against, so a graph built from a non-default
+        # ontology validates against its own vocabulary, not this package's.
+        "entity_types": sorted(ontology.entity_types),
+        "context_types": sorted(ontology.context_types),
+        "inverse_labels": ontology.inverse_label,
         "relation_groups": {g: [r for r in rels if r in present]
-                            for g, rels in RELATION_GROUPS.items()
+                            for g, rels in ontology.relation_groups.items()
                             if any(r in present for r in rels)},
-        "context_relations": [r for r in CONTEXT_RELATIONS if r in present],
+        "context_relations": [r for r in ontology.context_relations if r in present],
         "nodes": [dict(n.to_json(), degree=degree.get(n.id, 0))
                   for n in sorted(nodes.values(), key=lambda n: n.id)],
         "edges": [e.to_json() for e in sorted(edges, key=lambda e: e.key)],

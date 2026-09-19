@@ -13,8 +13,11 @@ def load(path: str | Path) -> dict:
             if key in src:
                 src[key] = str((base / src[key]).resolve())
     # Every path in the config is relative to the config file, so the module
-    # stays portable — the entity registry is no exception.
+    # stays portable — the entity registry and a custom ontology schema are
+    # no exception.
     onto = cfg.get("ontology")
     if onto and "entities" in onto:
         onto["entities"] = str((base / onto["entities"]).resolve())
+    if onto and "schema" in onto:
+        onto["schema"] = str((base / onto["schema"]).resolve())
     return cfg

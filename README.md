@@ -100,7 +100,8 @@ corpus and this module stays portable. See `example.toml`.
 
 Two kinds of node, and the split is the design:
 
-- **Entities** are what the graph is about. There are 14 types: `Concept`,
+- **Entities** are what the graph is about. `DEFAULT` (this package's own,
+  used unless a build says otherwise) has 14 types: `Concept`,
   `ArchitecturePattern`, `Technology`, `Component`, `Language`, `API`,
   `Protocol`, `Standard`, `FileFormat`, `TableFormat`, `Product`,
   `CloudService`, `Company` and `UseCase`. Ids are type-neutral
@@ -114,6 +115,26 @@ Semantic relations (`IMPLEMENTS`, `HAS_COMPONENT`, `READS`, `RUNS_ON`,
 evidence. `corpusatlas validate` refuses a semantic edge that touches a
 context node. The artifact carries `entity_types` and `inverse_labels`, so a
 renderer never hard-codes the split.
+
+**The vocabulary itself is an `Ontology` value, not a fixed set of
+constants.** `DEFAULT` is a data-and-infrastructure-architecture ontology,
+built for this package's own use, and every extractor, the resolver and
+`write_graph` take an `ontology=` parameter and use it instead of reaching
+for a module global — which is what lets a build actually swap it out. A
+corpus about something else entirely — cooking, case law, whatever — gets its
+own types and relations from a schema file:
+
+```toml
+# in your corpus's config
+[ontology]
+entities = "entities.toml"   # unchanged: named instances of the types below
+schema   = "ontology.toml"   # new: the types and relations themselves
+```
+
+See [docs/ontology-schema.md](docs/ontology-schema.md) for the file format
+and a complete worked example, and [docs/DESIGN.md](docs/DESIGN.md) for why
+the id scheme and the three extraction tiers stay fixed regardless — those
+are structural, not vocabulary.
 
 The **entity registry** (`entities.toml`) is the vocabulary. It gives each
 entity a name, type, aliases and links. It also lists the scorecard options,

@@ -13,12 +13,14 @@ from .emit import write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
 from .graphml import write_graphml
 from .merge import merge
-from .ontology import CONTEXT_TYPES, NODE_TYPES, SEMANTIC_RELATIONS, TIERS
+from .ontology import DEFAULT, Ontology, TIERS
 from .resolve import Resolver
 
 
 def cmd_build(args) -> int:
     cfg = cfgmod.load(args.config)
+    schema = (cfg.get("ontology") or {}).get("schema")
+    ontology = Ontology.from_toml(schema) if schema else DEFAULT
     docs, sources = [], []
     for spec in cfg.get("sources", []):
         adapter = build_adapter(spec)
@@ -31,7 +33,7 @@ def cmd_build(args) -> int:
         print("no documents found — check the paths in your config", file=sys.stderr)
         return 1
 
-    resolver = Resolver.from_config(cfg)
+    resolver = Resolver.from_config(cfg, ontology=ontology)
     # Order is precedence: merge keeps the first writer of any node or edge.
     # Deterministic runs first, packs second (a curated claim beats an
     # independent re-derivation of the same fact), and the mentions scanner
@@ -39,11 +41,11 @@ def cmd_build(args) -> int:
     # it can only ADD reach, never relabel or override a hand-written or
     # reviewed claim. Sequential, not a uniform loop, because mentions needs
     # to see what the earlier tiers named before it can search for it.
-    det = DeterministicExtractor(resolver=resolver)
+    det = DeterministicExtractor(resolver=resolver, ontology=ontology)
     det_nodes, det_edges = (list(x) for x in det.run(docs))
-    packs = PacksExtractor.from_config(cfg, resolver=resolver)
+    packs = PacksExtractor.from_config(cfg, resolver=resolver, ontology=ontology)
     pack_nodes, pack_edges = (list(x) for x in packs.run(docs))
-    mentions = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver)
+    mentions = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver, ontology=ontology)
     ment_nodes, ment_edges = (list(x) for x in mentions.run(docs))
 
     for ex_name, n, e in ((det.name, det_nodes, det_edges),
@@ -54,7 +56,7 @@ def cmd_build(args) -> int:
     node_sets = [det_nodes, pack_nodes, ment_nodes]
     edge_sets = [det_edges, pack_edges, ment_edges]
     nodes, edges = merge(node_sets, edge_sets, live_doc_ids={d.id for d in docs})
-    counts = write_graph(Path(args.out), nodes, edges, sources=sources)
+    counts = write_graph(Path(args.out), nodes, edges, sources=sources, ontology=ontology)
     print(f"\nwrote {args.out}: {counts['nodes']} nodes, {counts['edges']} edges")
     return 0
 
@@ -84,8 +86,20 @@ def cmd_stats(args) -> int:
 
 
 def cmd_validate(args) -> int:
-    """Invariants the artifact must satisfy before it is allowed to ship."""
+    """Invariants the artifact must satisfy before it is allowed to ship.
+
+    Reads its vocabulary from the artifact itself (`entity_types`,
+    `context_types`, `relation_groups`) rather than this package's own
+    ontology — a graph built from a custom schema validates against its own
+    vocabulary, not corpusatlas's default. `context_types` is only present
+    from this version on; an older artifact falls back to the default so it
+    still validates.
+    """
     g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    entity_types = set(g.get("entity_types") or ())
+    context_types = set(g.get("context_types") or DEFAULT.context_types)
+    node_types = entity_types | context_types
+    semantic_relations = {r for rs in (g.get("relation_groups") or {}).values() for r in rs}
     ids = {n["id"] for n in g["nodes"]}
     errs: list[str] = []
 
@@ -95,7 +109,7 @@ def cmd_validate(args) -> int:
     # type nothing recognises means a producer invented one, and the renderer
     # would draw it in the fallback grey rather than fail.
     for n in g["nodes"]:
-        if n["type"] not in NODE_TYPES:
+        if n["type"] not in node_types:
             errs.append(f"unknown node type {n['type']!r} on {n['id']}")
     for e in g["edges"]:
         if e["src"] not in ids:
@@ -113,8 +127,8 @@ def cmd_validate(args) -> int:
     # would be invisible in one and wrong in the other.
     types = {n["id"]: n["type"] for n in g["nodes"]}
     for e in g["edges"]:
-        if e["rel"] in SEMANTIC_RELATIONS and (types.get(e["src"]) in CONTEXT_TYPES
-                                              or types.get(e["dst"]) in CONTEXT_TYPES):
+        if e["rel"] in semantic_relations and (types.get(e["src"]) in context_types
+                                              or types.get(e["dst"]) in context_types):
             errs.append(f"semantic edge touches a context node: {e['src']}-{e['rel']}->{e['dst']}")
     if g["counts"]["nodes"] != len(g["nodes"]) or g["counts"]["edges"] != len(g["edges"]):
         errs.append("counts header disagrees with the payload")

@@ -32,7 +32,9 @@ url_base = "/knowledge-base/entities/"
 # url_list_file = "urls.txt"   # one URL per line, combined with `urls` above
 
 [ontology]
-entities = "entities.toml"      # the entity registry
+entities = "entities.toml"      # the entity registry: named instances of the types below
+# schema = "ontology.toml"      # optional; a custom vocabulary instead of DEFAULT's
+                                 # data-and-infrastructure one — see docs/ontology-schema.md
 
 # Packs cite their sources by URL; the graph joins on document id. These say
 # how to get from one to the other. The defaults are the values below minus

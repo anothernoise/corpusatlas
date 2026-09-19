@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 
 from ..model import Document, Edge, Node
-from ..ontology import ENTITY_TYPES
+from ..ontology import DEFAULT, Ontology
 from ..resolve import Resolver
 
 # A company named in passing is not a subject the article covers — "runs on
@@ -57,14 +57,15 @@ class MentionsExtractor:
     name = "mentions@2"
     tier = "extracted"
 
-    def __init__(self, vocabulary: list[Node], resolver: Resolver | None = None):
+    def __init__(self, vocabulary: list[Node], resolver: Resolver | None = None,
+                ontology: Ontology = DEFAULT):
         resolver = resolver or Resolver()
         # One compiled pattern per entity, built once, so a few hundred
         # articles scan in a second or two.
         self._entries: list[tuple[str, re.Pattern, int]] = []
         seen: set[str] = set()
         for n in vocabulary:
-            if n.type not in ENTITY_TYPES or n.type in NOT_MENTIONED or n.id in seen:
+            if n.type not in ontology.entity_types or n.type in NOT_MENTIONED or n.id in seen:
                 continue
             seen.add(n.id)
             reg = resolver.entity(n.id) or {}

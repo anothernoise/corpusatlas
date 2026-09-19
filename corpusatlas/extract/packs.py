@@ -25,7 +25,7 @@ import re
 import sys
 
 from ..model import Document, Edge, Node
-from ..ontology import SEMANTIC_RELATIONS, SYMMETRIC, canonical, validate_edge
+from ..ontology import DEFAULT, Ontology
 from ..resolve import Resolver, entity_id
 
 BLOG_PREFIX = "/blog/"
@@ -61,20 +61,24 @@ class PacksExtractor:
                  site_url: str | None = None,
                  blog_prefix: str = BLOG_PREFIX,
                  assessment_prefix: str = ASSESSMENT_PREFIX,
-                 assessment_id_prefix: str = ASSESSMENT_ID_PREFIX):
+                 assessment_id_prefix: str = ASSESSMENT_ID_PREFIX,
+                 ontology: Ontology = DEFAULT):
         self.resolver = resolver or Resolver()
+        self.ontology = ontology
         self.blog_doc_id = url_matcher(blog_prefix, site_url=site_url)
         self.assessment_doc_id = url_matcher(assessment_prefix, site_url=site_url,
                                              id_prefix=assessment_id_prefix)
 
     @classmethod
-    def from_config(cls, cfg: dict, resolver: Resolver | None = None) -> "PacksExtractor":
+    def from_config(cls, cfg: dict, resolver: Resolver | None = None,
+                    ontology: Ontology = DEFAULT) -> "PacksExtractor":
         p = cfg.get("packs") or {}
         return cls(resolver=resolver,
                    site_url=p.get("site_url"),
                    blog_prefix=p.get("blog_prefix", BLOG_PREFIX),
                    assessment_prefix=p.get("assessment_prefix", ASSESSMENT_PREFIX),
-                   assessment_id_prefix=p.get("assessment_id_prefix", ASSESSMENT_ID_PREFIX))
+                   assessment_id_prefix=p.get("assessment_id_prefix", ASSESSMENT_ID_PREFIX),
+                   ontology=ontology)
 
     def run(self, docs: list[Document]):
         nodes: list[Node] = []
@@ -128,11 +132,11 @@ class PacksExtractor:
             seen: set[tuple] = set()
             for rel_spec in pack.get("relationships", []):
                 raw = (rel_spec["source_id"], rel_spec["relationship"], rel_spec["target_id"])
-                rel, src, dst = canonical(rel_spec["relationship"],
+                rel, src, dst = self.ontology.canonical(rel_spec["relationship"],
                                           entity_id(rel_spec["source_id"]),
                                           entity_id(rel_spec["target_id"]))
                 where = f"{d.id}: {raw[0]} -{raw[1]}-> {raw[2]}"
-                if rel not in SEMANTIC_RELATIONS:
+                if rel not in self.ontology.semantic_relations:
                     raise PackError(f"{where}: {rel} is not a semantic relation")
                 types = []
                 for end in (src, dst):
@@ -141,14 +145,14 @@ class PacksExtractor:
                         raise PackError(f"{where}: {end} is declared neither in the pack "
                                         f"nor in the entity registry")
                     types.append(t)
-                problems = validate_edge(rel, *types, confidence=rel_spec.get("confidence"))
+                problems = self.ontology.validate_edge(rel, *types, confidence=rel_spec.get("confidence"))
                 if rel_spec.get("confidence") is None:
                     problems.append("confidence is required")
                 if not rel_spec.get("explanation"):
                     problems.append("explanation is required")
                 if problems:
                     raise PackError(f"{where}: " + "; ".join(problems))
-                if rel in SYMMETRIC:
+                if rel in self.ontology.symmetric:
                     src, dst = sorted((src, dst))
                 if (src, rel, dst) in seen:
                     continue

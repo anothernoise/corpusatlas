@@ -11,7 +11,7 @@ entity (or entities) that choice is.
 from __future__ import annotations
 
 from ..model import Document, Edge, Node
-from ..ontology import typecheck
+from ..ontology import DEFAULT, Ontology
 from ..resolve import Resolver
 
 # A source document's kind decides what kind of context node it becomes.
@@ -43,10 +43,11 @@ class DeterministicExtractor:
     name = "deterministic@2"
     tier = "deterministic"
 
-    def __init__(self, resolver: Resolver | None = None):
+    def __init__(self, resolver: Resolver | None = None, ontology: Ontology = DEFAULT):
         # An empty resolver still slugs, so this works with no registry at
         # all — the registry only ever adds identity and types on top.
         self.resolver = resolver or Resolver()
+        self.ontology = ontology
 
     def run(self, docs: list[Document]):
         nodes: dict[str, Node] = {}
@@ -132,7 +133,7 @@ class DeterministicExtractor:
 
         kept = [e for e in edges
                 if e.src in types and e.dst in types
-                and typecheck(e.rel, types[e.src], types[e.dst])]
+                and self.ontology.typecheck(e.rel, types[e.src], types[e.dst])]
         return list(nodes.values()), kept
 
     def _radar_edges(self, d: Document, prov: dict) -> list[Edge]:

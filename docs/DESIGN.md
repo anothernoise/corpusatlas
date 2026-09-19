@@ -48,17 +48,18 @@ hand.
 ## The ontology has to be closed before extraction, not after
 
 Open-vocabulary extraction over a technical corpus produces a swamp. This is
-why `ontology.py` declares a fixed set of entity types and, for every
+why an `Ontology` declares a closed set of entity types and, for every
 relation, an explicit type signature — which entity types are valid on each
 end. A pack proposing `HAS_COMPONENT` from a `Concept` fails the build before
 it reaches the graph, mechanically, without anyone reviewing it by eye.
 
-The honest tradeoff: that ontology is fixed, not pluggable. It's generic
-across *sites* — nothing in it names any particular corpus — but specific to
-*this domain*, a data-and-infrastructure-architecture vocabulary (`Technology`,
+This package's own `DEFAULT` ontology is generic across *sites* — nothing in
+it names any particular corpus — but specific to *this domain*, a
+data-and-infrastructure-architecture vocabulary (`Technology`,
 `ArchitecturePattern`, `CloudService`, and eleven more). A corpus about
-biology or law would need to fork `ontology.py` rather than write a config
-block. See "Flexibility" below.
+biology or law wants its own types and relations, not `DEFAULT`'s — and can
+have them from a schema file, without forking anything. See "Flexibility"
+below.
 
 ## Entity resolution is the actual work
 
@@ -117,11 +118,14 @@ different answers:
 - **Config.** Already flexible: everything in a `[[sources]]` block is
   adapter-specific keyword arguments, and paths resolve relative to the
   config file, not the install location.
-- **Ontology.** The rigid one, on purpose for now: 14 entity types and 25
-  typed relations, fixed as Python constants in `ontology.py`, imported as
-  such from extraction through validation. Making this genuinely
-  config-driven — an `ontology.toml` a reader could edit without forking —
-  is a real, undone project, not a quick patch: every module that currently
-  does `from .ontology import ENTITY_TYPES` would need to take an ontology
-  as a parameter instead. Worth doing for a second real consumer outside
-  data/infrastructure writing; not worth doing speculatively.
+- **Ontology.** Configurable now, as of `Ontology` becoming a value rather
+  than a set of module constants — every extractor, the resolver and
+  `write_graph` take `ontology=` and default to `DEFAULT` (this package's own
+  14 types, 25 relations), never reaching for a module global directly. A
+  corpus in a different domain gets its own types and relations from a
+  `[ontology] schema` TOML file, checked at load with the same closed-world
+  rules `DEFAULT` has always had to satisfy — see
+  [docs/ontology-schema.md](ontology-schema.md). What's still fixed
+  regardless: the `entity:`/`assessment:`/`radar:`/`topic:` id-prefix scheme,
+  and the three extraction tiers themselves. Those are structural — shared by
+  every ontology — not vocabulary a schema file would sensibly vary.
