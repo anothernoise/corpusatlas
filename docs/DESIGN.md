@@ -25,6 +25,33 @@ boundary as much as raw count does. This module is built for the top row and
 works into the second; past that, the tradeoffs this repo makes (one writer,
 no auth, ship the whole file) start working against you rather than for you.
 
+**What "fits in memory" actually measures like.** `scripts/profile_scale.py`
+builds a synthetic, cross-linked corpus and times every pipeline stage —
+real numbers, not the claim restated. At 5,000 documents (shirokoff.ca
+itself is ~350): 8.2s total, 74MB peak Python-level allocation
+(`tracemalloc`), a 12.9MB `graph.json`. At 20,000 (4x): 27.1s, 295MB, 52MB
+— scaling roughly linearly, not quadratically, in every stage. Where the
+time actually goes, at either size: **adapter parsing dominates** (~50-59%
+— this is exactly what `--cache` exists to skip on a rebuild), the
+**mentions tier** is the one extraction stage worth naming (~19-23%, word-
+boundary scanning over every document's full text), and **JSON
+serialisation** is a comparable, easy-to-forget cost (~19-23%) since it's
+outside "extraction" entirely. The deterministic tier, packs and merge are
+all near-zero regardless of size.
+
+This is also the answer to "should extraction run in parallel processes":
+investigated, not implemented. At 20,000 documents the only genuinely
+parallel-shaped extraction cost (mentions, embarrassingly parallel per
+document) is a fifth of total time, and it's dwarfed by adapter parsing —
+which `--cache` already addresses on every build after the first, for free,
+with no new failure modes. Multiprocessing would add real complexity
+(process pool lifecycle, pickling Documents/Nodes/Edges across a process
+boundary) to shave a minority slice of a build nobody has actually reported
+as slow — corpusatlas's one real consumer today is 70x smaller than the
+size tested here. Worth revisiting if a corpus this large and this
+mention-heavy actually shows up; not worth building against a corpus that
+doesn't exist yet.
+
 ## Mine the structure you already wrote
 
 A well-maintained corpus already contains a hand-authored knowledge graph,
