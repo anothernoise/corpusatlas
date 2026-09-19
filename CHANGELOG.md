@@ -4,7 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
-## [Unreleased]
+## [0.6.0] — 2026-09-19
 
 ### Added
 - **Logseq adapter** (`logseq`) — the seventh source. Same `[[wikilink]]`
