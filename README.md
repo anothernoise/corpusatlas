@@ -41,7 +41,7 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.4.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.5.0
 
 corpusatlas build --config your-corpus.toml --out graph.json
 corpusatlas stats    --graph graph.json
