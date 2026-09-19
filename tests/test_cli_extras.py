@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from corpusatlas.__main__ import cmd_init, cmd_ontology_check, main
+from corpusatlas.__main__ import cmd_init, cmd_ontology_check, cmd_registry_check, main
 
 GOOD_SCHEMA = """
 entity_types = ["Dish", "Ingredient"]
@@ -58,6 +58,76 @@ def test_ontology_check_through_the_real_cli_argv():
         assert main(["ontology-check", "--schema", str(schema)]) == 0
         bad = write(Path(d) / "bad.toml", BAD_SCHEMA)
         assert main(["ontology-check", "--schema", str(bad)]) == 1
+
+
+# --- registry-check --------------------------------------------------------
+
+GOOD_ENTITIES = """
+[[entity]]
+id = "apache-spark"
+name = "Apache Spark"
+type = "Technology"
+
+[[entity]]
+id = "olap"
+name = "OLAP"
+type = "Concept"
+"""
+
+DUPLICATE_ID_ENTITIES = """
+[[entity]]
+id = "apache-spark"
+name = "Apache Spark"
+type = "Technology"
+
+[[entity]]
+id = "apache-spark"
+name = "Apache Spark Again"
+type = "Technology"
+"""
+
+UNKNOWN_TYPE_ENTITIES = """
+[[entity]]
+id = "a-dish"
+name = "A Dish"
+type = "Dish"
+"""
+
+
+def test_registry_check_accepts_a_valid_registry():
+    with tempfile.TemporaryDirectory() as d:
+        entities = write(Path(d) / "entities.toml", GOOD_ENTITIES)
+        assert cmd_registry_check(type("Args", (), {"entities": str(entities), "schema": None})) == 0
+
+
+def test_registry_check_rejects_a_duplicate_id():
+    with tempfile.TemporaryDirectory() as d:
+        entities = write(Path(d) / "entities.toml", DUPLICATE_ID_ENTITIES)
+        assert cmd_registry_check(type("Args", (), {"entities": str(entities), "schema": None})) == 1
+
+
+def test_registry_check_rejects_a_type_the_ontology_does_not_declare():
+    with tempfile.TemporaryDirectory() as d:
+        entities = write(Path(d) / "entities.toml", UNKNOWN_TYPE_ENTITIES)
+        assert cmd_registry_check(type("Args", (), {"entities": str(entities), "schema": None})) == 1
+
+
+def test_registry_check_honours_a_custom_schema():
+    # "Dish" isn't a DEFAULT entity type, but it is in this custom schema —
+    # the same registry that fails against DEFAULT should pass here.
+    with tempfile.TemporaryDirectory() as d:
+        schema = write(Path(d) / "ontology.toml", GOOD_SCHEMA)
+        entities = write(Path(d) / "entities.toml", UNKNOWN_TYPE_ENTITIES)
+        args = type("Args", (), {"entities": str(entities), "schema": str(schema)})
+        assert cmd_registry_check(args) == 0
+
+
+def test_registry_check_through_the_real_cli_argv():
+    with tempfile.TemporaryDirectory() as d:
+        entities = write(Path(d) / "entities.toml", GOOD_ENTITIES)
+        assert main(["registry-check", "--entities", str(entities)]) == 0
+        bad = write(Path(d) / "bad.toml", DUPLICATE_ID_ENTITIES)
+        assert main(["registry-check", "--entities", str(bad)]) == 1
 
 
 # --- init -----------------------------------------------------------------
