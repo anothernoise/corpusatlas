@@ -31,6 +31,15 @@ url_base = "/knowledge-base/entities/"
 # url_base  = "/vault/"    # notes aren't usually published; this is synthetic
 # recursive = true         # false to ignore subfolders
 
+# A Logseq graph: same [[wikilinks]], but properties are `key:: value` lines
+# rather than YAML frontmatter, and every line is conventionally a bullet.
+# See corpusatlas/adapters/logseq.py for what it does and doesn't parse.
+# [[sources]]
+# type      = "logseq"
+# path      = "../my-graph/pages"
+# url_base  = "/notes/"
+# recursive = true
+
 # For a corpus that isn't a local checkout: a plain list of URLs, fetched at
 # build time. Real network I/O, unlike every other adapter here — a build
 # using this is only as reproducible as the pages it fetches, and fails if

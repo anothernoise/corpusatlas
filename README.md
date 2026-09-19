@@ -21,14 +21,15 @@ Two rules keep this a module rather than a framework:
 
 1. **Sources are adapters.** Every adapter yields the same `Document` shape.
    The core never learns the name of your blog, your book, or your CMS. Ships
-   with six: a directory of rendered HTML (`html_blog`), an Obsidian vault
-   (`obsidian` — `[[wikilinks]]` become `REFERENCES` edges with zero
-   adapter-specific glue, since the deterministic tier already knows what to
-   do with a link), the Architecture Radar's scorecards and dated entries,
-   curated entity packs, and a plain list of URLs (`web`) for a corpus that
-   isn't a local checkout at all — see `corpusatlas/adapters/` for what each
-   one honestly does and doesn't extract. A new source is a class with one
-   `documents()` method; the existing six are the reference for the shape.
+   with seven: a directory of rendered HTML (`html_blog`), an Obsidian vault
+   (`obsidian`) or a Logseq graph (`logseq`) — `[[wikilinks]]` become
+   `REFERENCES` edges with zero adapter-specific glue either way, since the
+   deterministic tier already knows what to do with a link — the Architecture
+   Radar's scorecards and dated entries, curated entity packs, and a plain
+   list of URLs (`web`) for a corpus that isn't a local checkout at all — see
+   `corpusatlas/adapters/` for what each one honestly does and doesn't
+   extract. A new source is a class with one `documents()` method; the
+   existing seven are the reference for the shape.
 2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 
@@ -269,7 +270,7 @@ It grew inside that site's repository and was split out with
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). [CHANGELOG.md](CHANGELOG.md) has the
-version history; [docs/adapters.md](docs/adapters.md) lists all six sources
+version history; [docs/adapters.md](docs/adapters.md) lists all seven sources
 side by side.
 
 ## Licence

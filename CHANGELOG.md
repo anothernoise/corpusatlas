@@ -7,6 +7,11 @@ with no `1.0` yet reasonably can.
 ## [Unreleased]
 
 ### Added
+- **Logseq adapter** (`logseq`) — the seventh source. Same `[[wikilink]]`
+  syntax as `obsidian`, but page properties are `key:: value` lines rather
+  than YAML frontmatter, and every line is conventionally a bullet.
+  Deliberately not a Roam adapter too — Roam's shape is similar, but its
+  real export formats haven't been tested against this.
 - `Ontology.extend()` — layer new entity types and relations onto an
   existing ontology (`DEFAULT` or a loaded one) instead of redeclaring the
   whole vocabulary to add a few things to it. Raises `OntologyError` on any

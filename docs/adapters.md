@@ -2,13 +2,14 @@
 
 Every adapter is a class with one `documents()` method yielding `Document`s
 (`model.py`) — the core never learns anything about a source beyond that
-shape. This is the six that ship, side by side; each one's own module
+shape. This is the seven that ship, side by side; each one's own module
 docstring has the full story, including what it honestly doesn't handle.
 
 | `type` | Class | Reads | Config keys |
 | --- | --- | --- | --- |
 | `html_blog` | `HtmlBlogAdapter` | A directory of rendered HTML articles | `path`, `url_base` (default `/blog/`), `index` (optional; defaults to `path/index.html`, where tags are read from) |
 | `obsidian` | `ObsidianAdapter` | A directory of markdown notes — an Obsidian vault, or just plain markdown | `path`, `url_base` (default `/vault/`), `recursive` (default `true`) |
+| `logseq` | `LogseqAdapter` | A Logseq graph — outline markdown, `key:: value` page properties | `path`, `url_base` (default `/notes/`), `recursive` (default `true`) |
 | `web` | `WebAdapter` | A plain list of URLs, fetched at build time | `urls` (a list) and/or `url_list_file` (one URL per line); `timeout` (default `10.0`); `user_agent` |
 | `entity_packs` | `EntityPacksAdapter` | A directory of curated entity-pack JSON files | `path`, `url_base` (default `""`) |
 | `radar_scorecards` | `RadarScorecardsAdapter` | One JSON file: scored comparisons | `path` |
@@ -25,6 +26,11 @@ docstring has the full story, including what it honestly doesn't handle.
   `.md` files with no `[[links]]` at all still works, it just won't produce
   any `REFERENCES` edges from that adapter. This is also `corpusatlas init`'s
   default, because it's the one that runs against literally anything.
+- **A Logseq graph specifically?** `logseq` — same `[[wikilink]]` syntax as
+  Obsidian, but properties are `key:: value` lines rather than YAML
+  frontmatter, and every line is conventionally a bullet. Not "a Roam
+  adapter too": Roam's shape is similar, but its actual export formats
+  haven't been tested against this.
 - **A source you don't control, or that isn't a local checkout?** `web` — a
   list of URLs. The only adapter here that touches the network, which is a
   real tradeoff (see `adapters/web.py`): a build using it is only as
@@ -39,7 +45,7 @@ docstring has the full story, including what it honestly doesn't handle.
 
 ## Writing a new one
 
-Copy whichever of the six is closest in shape. The contract is exactly:
+Copy whichever of the seven is closest in shape. The contract is exactly:
 accept whatever config keys you need in `__init__`, and yield `Document`s
 from `documents()` — `id`, `title`, `url`, `kind` (almost always `"article"`
 unless you're doing something `radar_entries`-shaped), and whatever of

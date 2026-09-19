@@ -1,6 +1,7 @@
 """Source adapters. Each yields Documents and knows nothing about the graph."""
 from .entity_packs import EntityPacksAdapter
 from .html_blog import HtmlBlogAdapter
+from .logseq import LogseqAdapter
 from .obsidian import ObsidianAdapter
 from .radar_entries import RadarEntriesAdapter
 from .radar_scorecards import RadarScorecardsAdapter
@@ -9,6 +10,7 @@ from .web import WebAdapter
 REGISTRY = {
     "entity_packs": EntityPacksAdapter,
     "html_blog": HtmlBlogAdapter,
+    "logseq": LogseqAdapter,
     "obsidian": ObsidianAdapter,
     "radar_entries": RadarEntriesAdapter,
     "radar_scorecards": RadarScorecardsAdapter,
