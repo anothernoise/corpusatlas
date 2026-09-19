@@ -10,6 +10,7 @@ import html
 import re
 from pathlib import Path
 
+from ..cache import CacheBucket, hash_bytes
 from ..model import Document
 
 SKIP = {"index", "topics", "start-here"}
@@ -31,33 +32,49 @@ def _text(fragment: str) -> str:
 
 
 class HtmlBlogAdapter:
-    def __init__(self, path: str, url_base: str = "/blog/", index: str | None = None):
+    def __init__(self, path: str, url_base: str = "/blog/", index: str | None = None,
+                 cache: CacheBucket | None = None):
         self.path = Path(path)
         self.url_base = url_base
         # The card list carries the tags; the article pages do not.
         self.index = Path(index) if index else self.path / "index.html"
+        self._cache = cache
 
-    def _tags_by_slug(self) -> dict[str, tuple[str, ...]]:
-        if not self.index.exists():
-            return {}
-        s = self.index.read_text(encoding="utf-8")
+    def _tags_by_slug(self, index_bytes: bytes) -> dict[str, tuple[str, ...]]:
+        s = index_bytes.decode("utf-8")
         out: dict[str, tuple[str, ...]] = {}
         for m in re.finditer(r'data-tags="([^"]+)"\s*>\s*<a href="([a-z0-9-]+)"', s, re.S):
             out[m.group(2)] = tuple(t.strip() for t in m.group(1).split(",") if t.strip())
         return out
 
     def documents(self):
-        tags = self._tags_by_slug()
-        for f in sorted(self.path.glob("*.html")):
+        index_bytes = self.index.read_bytes() if self.index.exists() else b""
+        tags = self._tags_by_slug(index_bytes)
+        files = [f for f in sorted(self.path.glob("*.html")) if f.stem not in SKIP]
+
+        if self._cache:
+            # Tags come from the index page, not from each article's own
+            # file — a re-tagged index with every article file otherwise
+            # untouched must still invalidate the cache, or a cached
+            # article would keep serving its stale tags.
+            fingerprint = (hash_bytes(index_bytes), *(f.stem for f in files))
+            self._cache.enter(fingerprint)
+
+        for f in files:
             slug = f.stem
-            if slug in SKIP:
+            raw = f.read_bytes()
+            content_hash = hash_bytes(raw)
+            cached = self._cache.get(str(f), content_hash) if self._cache else None
+            if cached is not None:
+                yield cached
                 continue
-            s = f.read_text(encoding="utf-8")
+
+            s = raw.decode("utf-8")
             title_m = _TITLE.search(s)
             date_m = _DATE.search(s)
             body = _ARTICLE_START.split(s, maxsplit=1)[-1]
             links = {l for l in _LINK.findall(body) if l != slug and (self.path / f"{l}.html").exists()}
-            yield Document(
+            doc = Document(
                 id=slug,
                 title=_text(title_m.group(1)) if title_m else slug,
                 url=f"{self.url_base}{slug}",
@@ -67,3 +84,9 @@ class HtmlBlogAdapter:
                 tags=tags.get(slug, ()),
                 links=tuple(sorted(links)),
             )
+            if self._cache:
+                self._cache.put(str(f), content_hash, doc)
+            yield doc
+
+        if self._cache:
+            self._cache.commit((hash_bytes(index_bytes), *(f.stem for f in files)))

@@ -9,6 +9,7 @@ from pathlib import Path
 from . import __version__
 from . import config as cfgmod
 from .adapters import build as build_adapter
+from .cache import BuildCache
 from .csv_export import write_csv
 from .emit import SCHEMA_VERSION, write_graph
 from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
@@ -26,13 +27,20 @@ def cmd_build(args) -> int:
     cfg = cfgmod.load(args.config)
     schema = (cfg.get("ontology") or {}).get("schema")
     ontology = Ontology.from_toml(schema) if schema else DEFAULT
+    cache = BuildCache(Path(args.cache) if args.cache else None)
     docs, sources = [], []
     for spec in cfg.get("sources", []):
-        adapter = build_adapter(spec)
+        adapter = build_adapter(spec, cache=cache)
         got = list(adapter.documents())
         docs.extend(got)
         sources.append(f"{spec['type']} ({len(got)})")
         print(f"  {spec['type']:<20} {len(got):>4} documents")
+
+    if args.cache:
+        cache.save()
+        total = cache.hits + cache.misses
+        if total:
+            print(f"  cache               {cache.hits:>4}/{total} files reused from {args.cache}")
 
     if not docs:
         print("no documents found — check the paths in your config", file=sys.stderr)
@@ -262,6 +270,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", help="required unless --dry-run")
     b.add_argument("--dry-run", action="store_true",
                    help="report node/edge counts without writing the artifact")
+    b.add_argument("--cache",
+                   help="path to a file-parse cache (html_blog/obsidian/logseq only); "
+                        "created if missing, reused and updated if present")
     b.set_defaults(fn=cmd_build)
 
     s = sub.add_parser("stats", help="summarise a built graph")

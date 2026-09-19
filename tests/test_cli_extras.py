@@ -123,6 +123,37 @@ def test_build_without_out_or_dry_run_fails_cleanly_not_a_crash():
         assert rc == 1
 
 
+# --- build --cache ---------------------------------------------------------
+
+def test_build_cache_round_trips_through_the_real_cli_and_matches_uncached():
+    """--cache must never change what gets built — a cold build, a warm
+    (cached) rebuild, and an uncached build of the same corpus all have to
+    produce the exact same graph.json bytes."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        main(["init", "--dir", str(root)])
+        notes = root / "notes"
+        notes.mkdir()
+        write(notes / "Hello.md", "A first note, linking to [[World]].")
+        write(notes / "World.md", "The other note.")
+        config = str(root / "corpusatlas.toml")
+        cache_path = root / "cache.json"
+
+        uncached_out = root / "uncached.json"
+        assert main(["build", "--config", config, "--out", str(uncached_out)]) == 0
+
+        cold_out = root / "cold.json"
+        assert main(["build", "--config", config, "--out", str(cold_out),
+                    "--cache", str(cache_path)]) == 0
+        assert cache_path.exists()
+
+        warm_out = root / "warm.json"
+        assert main(["build", "--config", config, "--out", str(warm_out),
+                    "--cache", str(cache_path)]) == 0
+
+        assert uncached_out.read_bytes() == cold_out.read_bytes() == warm_out.read_bytes()
+
+
 def test_version_flag_is_wired_and_matches_the_package():
     import io
     import contextlib

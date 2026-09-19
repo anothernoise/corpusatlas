@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..cache import CacheBucket, hash_bytes
 from ..model import Document
 from ..resolve import slug
 
@@ -108,10 +109,12 @@ def plain_text(body: str) -> str:
 
 
 class ObsidianAdapter:
-    def __init__(self, path: str, url_base: str = "/vault/", recursive: bool = True):
+    def __init__(self, path: str, url_base: str = "/vault/", recursive: bool = True,
+                 cache: CacheBucket | None = None):
         self.path = Path(path)
         self.url_base = url_base
         self.recursive = recursive
+        self._cache = cache
 
     def _files(self):
         pattern = "**/*.md" if self.recursive else "*.md"
@@ -121,8 +124,22 @@ class ObsidianAdapter:
         files = self._files()
         by_title = {f.stem.lower(): f.stem for f in files}
 
+        if self._cache:
+            # Wikilink resolution depends on which stems exist at all, not
+            # just on any one file's own content — adding or removing a
+            # note can change what an unchanged file's [[link]] resolves
+            # to, so the fingerprint is the whole vault's file list.
+            self._cache.enter(tuple(f.stem for f in files))
+
         for f in files:
-            raw = f.read_text(encoding="utf-8")
+            raw_bytes = f.read_bytes()
+            content_hash = hash_bytes(raw_bytes)
+            cached = self._cache.get(str(f), content_hash) if self._cache else None
+            if cached is not None:
+                yield cached
+                continue
+
+            raw = raw_bytes.decode("utf-8")
             fm, body = split_frontmatter(raw)
             title = fm.get("title") or f.stem
 
@@ -143,7 +160,7 @@ class ObsidianAdapter:
 
             date = fm.get("date") or fm.get("created")
 
-            yield Document(
+            doc = Document(
                 id=f.stem,
                 title=title,
                 url=f"{self.url_base}{slug(title)}",
@@ -153,3 +170,9 @@ class ObsidianAdapter:
                 tags=tags,
                 links=tuple(sorted(links)),
             )
+            if self._cache:
+                self._cache.put(str(f), content_hash, doc)
+            yield doc
+
+        if self._cache:
+            self._cache.commit(tuple(f.stem for f in files))
