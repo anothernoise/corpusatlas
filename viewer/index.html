@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>corpusatlas graph viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9;
+    font: 14px/1.4 -apple-system, system-ui, sans-serif; }
+  #stage { position: absolute; inset: 0; }
+  #hud { position: absolute; top: 12px; left: 12px; max-width: 320px;
+    background: rgba(13,17,23,0.85); border: 1px solid #30363d; border-radius: 8px;
+    padding: 10px 14px; }
+  #hud p { margin: 4px 0; }
+  #legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
+  #legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+  #legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #card { position: absolute; top: 12px; right: 12px; width: 280px; max-height: 80vh;
+    overflow-y: auto; background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 8px; padding: 12px 14px; display: none; }
+  #card h3 { margin: 0 0 4px; font-size: 15px; }
+  #card .type { color: #8b949e; font-size: 12px; margin-bottom: 8px; }
+  #card ul { list-style: none; margin: 0; padding: 0; }
+  #card li { padding: 3px 0; border-top: 1px solid #21262d; font-size: 12.5px; }
+  #card li:first-child { border-top: none; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud">
+  <p><strong>corpusatlas</strong> — reference viewer</p>
+  <p id="status">loading…</p>
+  <div id="legend"></div>
+</div>
+<div id="card"></div>
+
+<!-- graphology and Sigma ship no ES-module browser build, so they load as
+     classic UMD globals here; ForceAtlas2 ships no browser build at all and
+     comes in as jsDelivr's +esm transform below, in the type="module" script
+     that uses it. Same pairing shirokoff.ca's own renderer uses — proven
+     versions, not arbitrary latest. -->
+<script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sigma@3.0.1/dist/sigma.min.js"></script>
+<script type="module">
+// A starting point, not a renderer to build on as-is: one static layout, no
+// live simulation, no drag, no path-finding, no URL routing. The production
+// renderer this was pulled from (shirokoff.ca/knowledge-base) is ~1900 lines
+// for exactly those features — deliberately not reproduced here, because
+// they were tuned for one specific graph's shape, not written to be generic.
+// Copy this file and grow it; it isn't meant to stay this small forever.
+//
+// Assumes graph.json sits next to this file — override with ?graph=<url>.
+import forceAtlas2 from 'https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/+esm';
+
+const Graph = window.graphology.Graph || window.graphology;
+const Sigma = window.Sigma.Sigma || window.Sigma;
+
+const statusEl = document.getElementById('status');
+const legendEl = document.getElementById('legend');
+const cardEl = document.getElementById('card');
+
+const params = new URLSearchParams(location.search);
+const graphUrl = params.get('graph') || './graph.json';
+
+// Deterministic colour per type from its name alone, so this works for any
+// corpusatlas ontology without hard-coding type names — the moment
+// ontology.py stops being fixed across every consumer (see the README),
+// this still won't need an edit. Sigma's WebGL node program parses #rrggbb
+// only, not arbitrary CSS colour syntax, so this returns hex, not hsl().
+function colorFor(type) {
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
+  const h = hash % 360, s = 0.65, l = 0.6;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (n) => Math.round(f(n) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(0)}${toHex(8)}${toHex(4)}`;
+}
+
+let data;
+try {
+  data = await fetch(graphUrl).then((r) => {
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  });
+} catch (err) {
+  statusEl.textContent = `Could not load ${graphUrl}: ${err.message}`;
+  throw err;
+}
+
+const entityTypes = new Set(data.entity_types || []);
+// Entities only, same choice the production renderer makes: context nodes
+// (articles, assessments — whatever a consumer's adapters produced) are
+// evidence, not graph structure, and drawing both makes most graphs a
+// hairball well before 1,000 nodes. Drop this filter to see everything.
+const nodes = data.nodes.filter((n) => entityTypes.has(n.type));
+const nodeIds = new Set(nodes.map((n) => n.id));
+const edges = data.edges.filter((e) => nodeIds.has(e.src) && nodeIds.has(e.dst));
+
+const g = new Graph({ multi: true });
+const maxDegree = Math.max(1, ...nodes.map((n) => n.degree || 0));
+for (const n of nodes) {
+  g.addNode(n.id, {
+    label: n.label,
+    kind: n.type, // "type" is reserved by Sigma for choosing a node's render program
+    size: 3 + 5 * Math.sqrt((n.degree || 0) / maxDegree),
+    color: colorFor(n.type),
+    x: Math.random(), y: Math.random(),
+    meta: n,
+  });
+}
+let dupes = 0;
+for (const e of edges) {
+  try {
+    g.addEdge(e.src, e.dst, { rel: e.rel, size: 1, color: 'rgba(139,148,158,0.35)' });
+  } catch (err) { dupes++; } // a second edge between the same pair — fine, just skip it
+}
+
+forceAtlas2.assign(g, {
+  iterations: 300,
+  settings: { gravity: 1, scalingRatio: 8, strongGravityMode: true, barnesHutOptimize: g.order > 2000 },
+});
+
+const renderer = new Sigma(g, document.getElementById('stage'), {
+  labelRenderedSizeThreshold: 8,
+  defaultDrawNodeHover: true,
+});
+
+renderer.on('clickNode', ({ node }) => {
+  const n = g.getNodeAttribute(node, 'meta');
+  const neighbours = g.neighbors(node).map((id) => g.getNodeAttribute(id, 'label'));
+  cardEl.style.display = 'block';
+  cardEl.innerHTML = `
+    <h3>${n.label}</h3>
+    <div class="type">${n.type} · degree ${n.degree || 0}</div>
+    ${n.url ? `<p><a href="${n.url}" target="_blank" rel="noopener">source →</a></p>` : ''}
+    <ul>${neighbours.slice(0, 25).map((l) => `<li>${l}</li>`).join('')}</ul>
+    ${neighbours.length > 25 ? `<p>+${neighbours.length - 25} more</p>` : ''}
+  `;
+});
+renderer.on('clickStage', () => { cardEl.style.display = 'none'; });
+
+for (const type of [...entityTypes].sort()) {
+  const span = document.createElement('span');
+  span.innerHTML = `<i style="background:${colorFor(type)}"></i>${type}`;
+  legendEl.appendChild(span);
+}
+
+statusEl.textContent = `${nodes.length} entities · ${edges.length - dupes} relationships` +
+  (data.generated ? ` · built ${data.generated}` : '');
+</script>
+</body>
+</html>

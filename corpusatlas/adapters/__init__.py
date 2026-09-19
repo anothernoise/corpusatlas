@@ -3,12 +3,14 @@ from .entity_packs import EntityPacksAdapter
 from .html_blog import HtmlBlogAdapter
 from .radar_entries import RadarEntriesAdapter
 from .radar_scorecards import RadarScorecardsAdapter
+from .web import WebAdapter
 
 REGISTRY = {
     "entity_packs": EntityPacksAdapter,
     "html_blog": HtmlBlogAdapter,
     "radar_entries": RadarEntriesAdapter,
     "radar_scorecards": RadarScorecardsAdapter,
+    "web": WebAdapter,
 }
 
 

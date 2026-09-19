@@ -17,7 +17,13 @@ browser tab and a graph database would be an operational cost with no payoff.
 Two rules keep this a module rather than a framework:
 
 1. **Sources are adapters.** Every adapter yields the same `Document` shape.
-   The core never learns the name of your blog, your book, or your CMS.
+   The core never learns the name of your blog, your book, or your CMS. Ships
+   with five: a directory of rendered HTML (`html_blog`), the Architecture
+   Radar's scorecards and dated entries, curated entity packs, and a plain
+   list of URLs (`web`) for a corpus that isn't a local checkout at all — see
+   `corpusatlas/adapters/web.py` for what that one honestly does and doesn't
+   extract. A new source is a class with one `documents()` method; the
+   existing five are the reference for the shape.
 2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 
@@ -32,10 +38,13 @@ No third-party dependencies. Python 3.11+.
 ```bash
 pip install git+https://github.com/anothernoise/corpusatlas@v0.4.0
 
-corpusatlas build --config example.toml --out graph.json
+corpusatlas build --config your-corpus.toml --out graph.json
 corpusatlas stats    --graph graph.json
 corpusatlas validate --graph graph.json
 ```
+
+`example.toml` shows the config shape but points at a real corpus's
+directories, so it isn't runnable as-is — see Configuration below.
 
 Working on the module itself:
 
@@ -152,6 +161,28 @@ Every edge carries where it came from:
 
 An edge is a claim made *by* a document. When the document goes, the claim goes
 with it — `merge.py` handles retraction, not just append.
+
+## Looking at the output
+
+`viewer/index.html` is a ~150-line reference renderer, not a library: one
+static ForceAtlas2 layout, type-coloured nodes, click a node to see its
+neighbours. No live simulation, no drag, no URL routing — the production
+renderer this was pulled from is ~1900 lines for exactly those, tuned for one
+specific graph's shape rather than written to be generic. Point it at any
+`graph.json` this module built and it will render — it reads only the fields
+`emit.py` documents (`entity_types`, `nodes[].type`, `.degree`, `.url`), never
+this ontology's specific type names.
+
+```bash
+corpusatlas build --config your-corpus.toml --out viewer/graph.json
+python3 -m http.server 8000    # from wherever viewer/ and graph.json both are
+# open http://localhost:8000/viewer/
+```
+
+(`example.toml`'s paths point at a real corpus's directories, so it won't
+build on its own inside a clone of this repo — swap in your own config, or
+pass `?graph=<url>` to point the viewer at any already-built `graph.json`,
+shirokoff.ca's included.)
 
 ## Used by
 

@@ -20,6 +20,17 @@ type     = "entity_packs"
 path     = "entities"
 url_base = "/knowledge-base/entities/"
 
+# For a corpus that isn't a local checkout: a plain list of URLs, fetched at
+# build time. Real network I/O, unlike every other adapter here — a build
+# using this is only as reproducible as the pages it fetches, and fails if
+# one is down rather than treating that as fatal for the whole build (a page
+# that doesn't fetch is skipped with a warning, not a build failure). See
+# corpusatlas/adapters/web.py for what its extraction can and can't do.
+# [[sources]]
+# type         = "web"
+# urls         = ["https://example.org/docs/one", "https://example.org/docs/two"]
+# url_list_file = "urls.txt"   # one URL per line, combined with `urls` above
+
 [ontology]
 entities = "entities.toml"      # the entity registry
 
