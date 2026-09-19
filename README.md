@@ -11,6 +11,9 @@ Built for the case described in
 [Build-Time Knowledge Graphs](https://shirokoff.ca/blog/build-time-knowledge-graph):
 a few hundred to a few thousand documents, where the whole graph fits in a
 browser tab and a graph database would be an operational cost with no payoff.
+[docs/DESIGN.md](docs/DESIGN.md) has the reasoning condensed for this repo —
+the size table, why entity resolution is the real work, and what's actually
+flexible here versus fixed on purpose.
 
 ## The contract
 
@@ -172,6 +175,8 @@ specific graph's shape rather than written to be generic. Point it at any
 `graph.json` this module built and it will render — it reads only the fields
 `emit.py` documents (`entity_types`, `nodes[].type`, `.degree`, `.url`), never
 this ontology's specific type names.
+
+![The reference viewer showing shirokoff.ca's 214-entity graph, type-coloured, with Apache Spark focused and its neighbours listed on the right](docs/images/viewer-screenshot.jpg)
 
 ```bash
 corpusatlas build --config your-corpus.toml --out viewer/graph.json
