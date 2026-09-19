@@ -72,6 +72,13 @@ any `html_blog`/`obsidian`/`logseq` file whose content hasn't changed since
 the last build at that cache path — opt-in, and never changes what gets
 built, only how long it takes.
 
+`corpusatlas diff --old OLD.json --new NEW.json` compares two built graphs —
+nodes and edges added, removed or changed — and `--fail-on-change` turns
+that into a gate: exit 1 if they differ at all, for a CI step asserting a
+rebuild is a no-op (exactly the check this project's own release process
+runs by hand before every release). `stats`, `validate` and `diff` all take
+`--json` for machine-readable output instead of the default text.
+
 Working on the module itself:
 
 ```bash

@@ -104,6 +104,18 @@ def cmd_stats(args) -> int:
     by_rel: dict[str, int] = {}
     for e in g["edges"]:
         by_rel[e["rel"]] = by_rel.get(e["rel"], 0) + 1
+    top = sorted(g["nodes"], key=lambda n: -n.get("degree", 0))[:10]
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "generated": g["generated"], "generator": g["generator"],
+            "schema_version": g.get("schema_version", 0),
+            "counts": g["counts"],
+            "by_type": by_type, "by_relation": by_rel,
+            "most_connected": [{"id": n["id"], "label": n["label"], "degree": n.get("degree", 0)}
+                               for n in top],
+        }, indent=1))
+        return 0
 
     print(f"generated {g['generated']} by {g['generator']} "
           f"(schema {g.get('schema_version', '<1')})")
@@ -114,7 +126,6 @@ def cmd_stats(args) -> int:
     print("\nedges by relation:")
     for k, v in sorted(by_rel.items(), key=lambda kv: -kv[1]):
         print(f"  {k:<12} {v:>5}")
-    top = sorted(g["nodes"], key=lambda n: -n.get("degree", 0))[:10]
     print("\nmost connected:")
     for n in top:
         print(f"  {n.get('degree',0):>4}  {n['label'][:60]}")
@@ -181,10 +192,82 @@ def cmd_validate(args) -> int:
     if isolated:
         errs.append(f"{len(isolated)} isolated nodes")
 
+    if getattr(args, "json", False):
+        print(json.dumps({"valid": not errs, "problems": errs}, indent=1))
+        return 1 if errs else 0
+
     for e in errs[:20]:
         print(f"  FAIL {e}", file=sys.stderr)
     print(f"{len(errs)} problems" if errs else "graph valid")
     return 1 if errs else 0
+
+
+def cmd_diff(args) -> int:
+    """Compares two built graphs — what a verification-before-shipping step
+    (this project's own release process, and any consuming site's CI) has
+    always had to reconstruct by hand: does a rebuild actually match what's
+    committed, and if not, exactly what changed. `--fail-on-change` turns
+    that into a gate: exit 1 if OLD and NEW differ at all, for a CI step
+    that's meant to assert a rebuild is a no-op.
+
+    Node degree is intentionally not itself a tracked field — it is derived
+    from edges, so a node whose degree changed shows up via the edge diff
+    that caused it, not as a second, redundant "node changed" report.
+    """
+    old = json.loads(Path(args.old).read_text(encoding="utf-8"))
+    new = json.loads(Path(args.new).read_text(encoding="utf-8"))
+
+    def node_content(n: dict) -> dict:
+        return {k: v for k, v in n.items() if k != "degree"}
+
+    old_nodes = {n["id"]: n for n in old["nodes"]}
+    new_nodes = {n["id"]: n for n in new["nodes"]}
+    nodes_added = sorted(set(new_nodes) - set(old_nodes))
+    nodes_removed = sorted(set(old_nodes) - set(new_nodes))
+    nodes_changed = sorted(nid for nid in (set(old_nodes) & set(new_nodes))
+                           if node_content(old_nodes[nid]) != node_content(new_nodes[nid]))
+
+    def edge_key(e: dict) -> tuple:
+        return (e["src"], e["rel"], e["dst"], e.get("scope") or "")
+
+    old_edges = {edge_key(e): e for e in old["edges"]}
+    new_edges = {edge_key(e): e for e in new["edges"]}
+    edges_added = sorted(set(new_edges) - set(old_edges))
+    edges_removed = sorted(set(old_edges) - set(new_edges))
+
+    changed = bool(nodes_added or nodes_removed or nodes_changed or edges_added or edges_removed)
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "changed": changed,
+            "nodes_added": nodes_added, "nodes_removed": nodes_removed,
+            "nodes_changed": nodes_changed,
+            "edges_added": [{"src": s, "rel": r, "dst": d, "scope": sc or None}
+                            for s, r, d, sc in edges_added],
+            "edges_removed": [{"src": s, "rel": r, "dst": d, "scope": sc or None}
+                              for s, r, d, sc in edges_removed],
+        }, indent=1))
+    else:
+        if not changed:
+            print("no differences")
+        else:
+            for nid in nodes_added:
+                print(f"  + node {nid} ({new_nodes[nid]['type']})")
+            for nid in nodes_removed:
+                print(f"  - node {nid} ({old_nodes[nid]['type']})")
+            for nid in nodes_changed:
+                print(f"  ~ node {nid}")
+            for s, r, d, sc in edges_added:
+                print(f"  + edge {s} -{r}-> {d}" + (f" [{sc}]" if sc else ""))
+            for s, r, d, sc in edges_removed:
+                print(f"  - edge {s} -{r}-> {d}" + (f" [{sc}]" if sc else ""))
+            print(f"\n{len(nodes_added)} nodes added, {len(nodes_removed)} removed, "
+                  f"{len(nodes_changed)} changed; "
+                  f"{len(edges_added)} edges added, {len(edges_removed)} removed")
+
+    if args.fail_on_change and changed:
+        return 1
+    return 0
 
 
 def cmd_convert(args) -> int:
@@ -331,11 +414,21 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("stats", help="summarise a built graph")
     s.add_argument("--graph", required=True)
+    s.add_argument("--json", action="store_true", help="machine-readable output")
     s.set_defaults(fn=cmd_stats)
 
     v = sub.add_parser("validate", help="check the graph's invariants")
     v.add_argument("--graph", required=True)
+    v.add_argument("--json", action="store_true", help="machine-readable output")
     v.set_defaults(fn=cmd_validate)
+
+    d = sub.add_parser("diff", help="compare two built graphs")
+    d.add_argument("--old", required=True)
+    d.add_argument("--new", required=True)
+    d.add_argument("--json", action="store_true", help="machine-readable output")
+    d.add_argument("--fail-on-change", action="store_true",
+                   help="exit 1 if OLD and NEW differ at all — for a CI step asserting a no-op rebuild")
+    d.set_defaults(fn=cmd_diff)
 
     c = sub.add_parser("convert", help="reformat a built graph as GraphML or CSV")
     c.add_argument("--graph", required=True)

@@ -275,6 +275,121 @@ def test_build_cache_round_trips_through_the_real_cli_and_matches_uncached():
         assert uncached_out.read_bytes() == cold_out.read_bytes() == warm_out.read_bytes()
 
 
+# --- diff --------------------------------------------------------------
+
+def _build(root: Path, notes: dict[str, str], out: Path) -> None:
+    main(["init", "--dir", str(root)])
+    vault = root / "notes"
+    vault.mkdir(exist_ok=True)
+    for name, text in notes.items():
+        write(vault / f"{name}.md", text)
+    assert main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(out)]) == 0
+
+
+def test_diff_reports_no_differences_for_an_identical_graph():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        graph = root / "graph.json"
+        _build(root, {"A": "Just a note."}, graph)
+        assert main(["diff", "--old", str(graph), "--new", str(graph)]) == 0
+
+
+def test_diff_finds_an_added_node_and_edge():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        old = root / "old.json"
+        _build(root, {"A": "Links to [[B]].", "B": "hi"}, old)
+
+        write(root / "notes" / "C.md", "New note.")
+        write(root / "notes" / "A.md", "Links to [[B]] and [[C]].")
+        new = root / "new.json"
+        assert main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(new)]) == 0
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["diff", "--old", str(old), "--new", str(new)])
+        assert rc == 0
+        out = buf.getvalue()
+        assert "+ node C" in out
+        assert "+ edge A -REFERENCES-> C" in out
+        assert "1 nodes added, 0 removed, 0 changed" in out
+
+
+def test_diff_json_output_is_machine_parseable():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        old = root / "old.json"
+        _build(root, {"A": "Links to [[B]].", "B": "hi"}, old)
+        write(root / "notes" / "B.md", "hi, revised")  # content change, not link/type/label
+        new = root / "new.json"
+        assert main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(new)]) == 0
+
+        import io, contextlib, json as json_mod
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["diff", "--old", str(old), "--new", str(new), "--json"])
+        result = json_mod.loads(buf.getvalue())
+        assert result["changed"] is False  # B's prose isn't a tracked field (no tags/links changed)
+        assert result["nodes_added"] == result["nodes_removed"] == []
+
+
+def test_diff_fail_on_change_gates_ci_style_usage():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        old = root / "old.json"
+        # A lone, unlinked note produces zero graph nodes — the wikilink is
+        # what actually gives the deterministic tier something to build a
+        # node from, and it's the change this test needs to be real.
+        _build(root, {"A": "Links to [[B]].", "B": "hi"}, old)
+
+        # identical rebuild: --fail-on-change must not fail
+        new_same = root / "new_same.json"
+        assert main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(new_same)]) == 0
+        assert main(["diff", "--old", str(old), "--new", str(new_same), "--fail-on-change"]) == 0
+
+        # a real change: --fail-on-change must fail
+        write(root / "notes" / "C.md", "A third note.")
+        write(root / "notes" / "A.md", "Links to [[B]] and [[C]].")
+        new_diff = root / "new_diff.json"
+        assert main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(new_diff)]) == 0
+        assert main(["diff", "--old", str(old), "--new", str(new_diff), "--fail-on-change"]) == 1
+        # without the flag, the same real change is just reported, not a failure
+        assert main(["diff", "--old", str(old), "--new", str(new_diff)]) == 0
+
+
+# --- --json on stats and validate -------------------------------------------
+
+def test_stats_json_matches_human_readable_counts():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        graph = root / "graph.json"
+        _build(root, {"A": "Links to [[B]].", "B": "hi"}, graph)
+
+        import io, contextlib, json as json_mod
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert main(["stats", "--graph", str(graph), "--json"]) == 0
+        result = json_mod.loads(buf.getvalue())
+        assert result["counts"] == {"nodes": 2, "edges": 1}
+        assert result["schema_version"] == 1
+        assert "by_type" in result and "most_connected" in result
+
+
+def test_validate_json_reports_problems_as_a_list():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        graph = root / "graph.json"
+        _build(root, {"A": "Just a note."}, graph)
+
+        import io, contextlib, json as json_mod
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert main(["validate", "--graph", str(graph), "--json"]) == 0
+        result = json_mod.loads(buf.getvalue())
+        assert result == {"valid": True, "problems": []}
+
+
 def test_version_flag_is_wired_and_matches_the_package():
     import io
     import contextlib
