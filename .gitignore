@@ -8,6 +8,8 @@ dist/
 .pytest_cache/
 .venv/
 venv/
+.coverage
+htmlcov/
 
 # Build output — the graph is generated, never committed inside this package.
 # (In the site repo the artifact lives at knowledge-base/graph.json.)

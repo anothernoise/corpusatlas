@@ -19,6 +19,11 @@ _DATE = re.compile(r'article:published_time"\s+content="([\d-]+)"')
 _TAGS = re.compile(r'data-tags="([^"]+)"')
 _LINK = re.compile(r'href="(?!http|/|#|\.\./|mailto:)([a-z0-9-]+)"')
 _TAG_RE = re.compile(r"<[^>]+>")
+# Consumes the rest of the opening tag too (any attributes after class=,
+# through the closing >), not just the bare string — splitting on the string
+# alone leaves a stray ">" as the first character of every article's body,
+# which _TAG_RE can't strip because it isn't a complete <...> tag.
+_ARTICLE_START = re.compile(r'class="article-content"[^>]*>')
 
 
 def _text(fragment: str) -> str:
@@ -50,7 +55,7 @@ class HtmlBlogAdapter:
             s = f.read_text(encoding="utf-8")
             title_m = _TITLE.search(s)
             date_m = _DATE.search(s)
-            body = s.split('class="article-content"', 1)[-1]
+            body = _ARTICLE_START.split(s, maxsplit=1)[-1]
             links = {l for l in _LINK.findall(body) if l != slug and (self.path / f"{l}.html").exists()}
             yield Document(
                 id=slug,

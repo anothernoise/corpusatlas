@@ -29,6 +29,25 @@ with no `1.0` yet reasonably can.
   header convention, so the output loads directly with `neo4j-admin
   database import` rather than needing a column-mapping step first.
 - `CONTRIBUTING.md`, `CHANGELOG.md`, issue templates, `docs/adapters.md`.
+- CI now runs on Windows too, not just Ubuntu, across all three supported
+  Python versions.
+- A coverage gate in CI (measured once, not per matrix combination;
+  `--fail-under=85`).
+- Dedicated tests for `html_blog`, `radar_scorecards` and `radar_entries` —
+  previously exercised only indirectly, through hand-built `Document`
+  objects that bypassed each adapter's own parsing. Found via a coverage
+  run showing all three well under 60%, `html_blog` (the adapter
+  shirokoff.ca's own build actually uses) at 42%.
+
+### Fixed
+- `html_blog`: every article's extracted text started with a stray `>` —
+  splitting on the literal string `class="article-content"` left the rest
+  of that div's opening tag (`>` and any later attributes) in the body,
+  which the tag-stripping regex couldn't remove because it wasn't a
+  complete `<...>` tag. Harmless to mention-matching in practice (confirmed:
+  the real site's graph node/edge counts are unchanged), but a real defect,
+  live in every build since this adapter existed — found while writing the
+  test above, not looked for.
 
 ## [0.5.0] — 2026-09-19
 
