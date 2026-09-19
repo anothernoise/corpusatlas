@@ -18,15 +18,23 @@ article.
 Links only connect within the batch: an href to a page not also in `urls`
 becomes a dead end (dropped, not a broken graph reference) — the same choice
 html_blog makes for a link outside its own directory.
+
+Fetches happen concurrently (`max_workers` threads, stdlib
+`ThreadPoolExecutor` — this is I/O-bound waiting on sockets, not CPU work,
+so the GIL isn't a concern), but `documents()` still yields in `urls`' own
+order regardless of which response comes back first: fetch order and output
+order are two different things, and only the second has to be deterministic.
 """
 from __future__ import annotations
 
 import re
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
+from .. import __version__
 from ..model import Document
 
 _SKIP_TAGS = {"script", "style", "nav", "header", "footer", "noscript", "template"}
@@ -89,7 +97,8 @@ def _slug(url: str) -> str:
 
 class WebAdapter:
     def __init__(self, urls: list[str] | None = None, url_list_file: str | None = None,
-                 timeout: float = 10.0, user_agent: str = "corpusatlas/0.4.0"):
+                 timeout: float = 10.0, user_agent: str = f"corpusatlas/{__version__}",
+                 max_workers: int = 8):
         given = list(urls or [])
         if url_list_file:
             with open(url_list_file, encoding="utf-8") as f:
@@ -99,6 +108,7 @@ class WebAdapter:
         self.urls = given
         self.timeout = timeout
         self.user_agent = user_agent
+        self.max_workers = max_workers
 
     def _fetch(self, url: str) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
@@ -106,15 +116,28 @@ class WebAdapter:
             charset = resp.headers.get_content_charset() or "utf-8"
             return resp.read().decode(charset, errors="replace")
 
+    def _fetch_all(self) -> list[tuple[str, str | None]]:
+        """One (url, html-or-None) pair per url, in `self.urls`' order — a
+        failed fetch is None, not an exception, so one bad page can't take
+        the rest of a concurrent batch down with it."""
+        workers = max(1, min(self.max_workers, len(self.urls)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(self._fetch, url) for url in self.urls]
+            out: list[tuple[str, str | None]] = []
+            for url, future in zip(self.urls, futures):
+                try:
+                    out.append((url, future.result()))
+                except (urllib.error.URLError, TimeoutError, OSError) as err:
+                    print(f"  warning: web: {url} failed to fetch ({err}); skipped", flush=True)
+                    out.append((url, None))
+            return out
+
     def documents(self):
         by_url = {u: _slug(u) for u in self.urls}
-        for url in self.urls:
-            slug = by_url[url]
-            try:
-                html_src = self._fetch(url)
-            except (urllib.error.URLError, TimeoutError, OSError) as err:
-                print(f"  warning: web: {url} failed to fetch ({err}); skipped", flush=True)
+        for url, html_src in self._fetch_all():
+            if html_src is None:
                 continue
+            slug = by_url[url]
 
             parser = _TextExtractor()
             parser.feed(html_src)

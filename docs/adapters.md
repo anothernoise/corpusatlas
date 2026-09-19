@@ -55,5 +55,22 @@ should be dropped, not left dangling (every adapter here does this; see how
 `html_blog` checks the target file exists, or how `obsidian` resolves
 against its own vault's filenames only).
 
-Register the class in `adapters/__init__.py`'s `REGISTRY` under whatever
-`type` name your config will use.
+## Shipping one as its own package
+
+You don't have to fork this repo to add an adapter. `build()` falls back to
+the `corpusatlas.adapters` entry-point group for any `type` it doesn't
+recognise, so a separate package can register one:
+
+```toml
+# in your plugin package's own pyproject.toml
+[project.entry-points."corpusatlas.adapters"]
+notion = "corpusatlas_notion.adapter:NotionAdapter"
+```
+
+Once that package is installed alongside corpusatlas, `[[sources]] type =
+"notion"` in a config resolves it exactly like `html_blog` resolves — no
+change to corpusatlas itself. The seven built-in names can never be shadowed
+this way: `REGISTRY` is checked before any entry point, so a plugin claiming
+`type = "html_blog"` is simply ignored in favour of the real one. An unknown
+`type` reports every name it looked for, built-in and external, in the same
+error.
