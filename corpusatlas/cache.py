@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -40,12 +41,19 @@ class BuildCache:
     """The whole on-disk cache: one JSON file, one independent bucket per
     adapter source (keyed by the caller's own choice of string, e.g.
     "html_blog:/abs/path/to/blog" — distinct sources never collide as long
-    as the key does)."""
+    as the key does).
+
+    A single BuildCache is shared across every source in a build, and
+    `cmd_build` may run those sources' adapters concurrently (one thread per
+    source) — each source's own CacheBucket is only ever touched by the one
+    thread running that source, but the hit/miss counters and the on-disk
+    `_data` dict are genuinely shared, hence the lock."""
 
     def __init__(self, path: Path | None):
         self.path = path
         self.hits = 0
         self.misses = 0
+        self._lock = threading.Lock()
         self._data: dict[str, Any] = {}
         if path is not None and path.exists():
             try:
@@ -56,8 +64,17 @@ class BuildCache:
     def bucket(self, key: str) -> CacheBucket:
         return CacheBucket(self, key, self._data.get(key) or {})
 
+    def _record_hit(self) -> None:
+        with self._lock:
+            self.hits += 1
+
+    def _record_miss(self) -> None:
+        with self._lock:
+            self.misses += 1
+
     def _commit_bucket(self, key: str, raw: dict) -> None:
-        self._data[key] = raw
+        with self._lock:
+            self._data[key] = raw
 
     def save(self) -> None:
         if self.path is None:
@@ -88,13 +105,13 @@ class CacheBucket:
 
     def get(self, path: str, content_hash: str) -> Document | None:
         if not self._valid:
-            self._cache.misses += 1
+            self._cache._record_miss()
             return None
         entry = self._prev_files.get(path)
         if not entry or entry.get("hash") != content_hash:
-            self._cache.misses += 1
+            self._cache._record_miss()
             return None
-        self._cache.hits += 1
+        self._cache._record_hit()
         data = dict(entry["document"])
         data["tags"] = tuple(data.get("tags") or ())
         data["links"] = tuple(data.get("links") or ())

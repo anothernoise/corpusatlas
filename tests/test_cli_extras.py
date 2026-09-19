@@ -6,11 +6,14 @@ buildable, so the test proves that by building it.
 """
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from corpusatlas.__main__ import cmd_init, cmd_ontology_check, cmd_registry_check, main
+from test_web_adapter import SLOW_DELAY, _serve
 
 GOOD_SCHEMA = """
 entity_types = ["Dish", "Ingredient"]
@@ -191,6 +194,54 @@ def test_build_without_out_or_dry_run_fails_cleanly_not_a_crash():
         (root / "notes").mkdir()
         rc = main(["build", "--config", str(root / "corpusatlas.toml")])
         assert rc == 1
+
+
+# --- multiple sources load concurrently -------------------------------------
+
+def test_multiple_sources_load_concurrently_not_one_after_another():
+    """Two web sources, each hitting a single SLOW_DELAY endpoint with its
+    own concurrency turned off (max_workers=1) so this measures cmd_build's
+    cross-source concurrency specifically, not WebAdapter's internal kind."""
+    server = _serve()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        with tempfile.TemporaryDirectory() as d:
+            config = Path(d) / "corpusatlas.toml"
+            config.write_text(f'''
+[[sources]]
+type = "web"
+urls = ["{base}/slow/0"]
+max_workers = 1
+respect_robots = false
+
+[[sources]]
+type = "web"
+urls = ["{base}/slow/1"]
+max_workers = 1
+respect_robots = false
+''', encoding="utf-8")
+            out = Path(d) / "graph.json"
+            start = time.monotonic()
+            rc = main(["build", "--config", str(config), "--out", str(out), "--dry-run"])
+            elapsed = time.monotonic() - start
+    finally:
+        server.shutdown()
+
+    assert rc == 0
+    # Serial would be ~2x SLOW_DELAY; concurrent sources should land near 1x.
+    assert elapsed < SLOW_DELAY * 1.8, f"took {elapsed:.2f}s — sources don't look concurrent"
+
+
+def test_a_single_source_skips_the_thread_pool_and_still_works():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        main(["init", "--dir", str(root)])
+        (root / "notes").mkdir()
+        write(root / "notes" / "A.md", "Solo note.")
+        out = root / "graph.json"
+        rc = main(["build", "--config", str(root / "corpusatlas.toml"), "--out", str(out)])
+        assert rc == 0
+        assert out.exists()
 
 
 # --- build --cache ---------------------------------------------------------

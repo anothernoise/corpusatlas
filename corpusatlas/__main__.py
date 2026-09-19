@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import __version__
@@ -30,10 +31,26 @@ def cmd_build(args) -> int:
     schema = (cfg.get("ontology") or {}).get("schema")
     ontology = Ontology.from_toml(schema) if schema else DEFAULT
     cache = BuildCache(Path(args.cache) if args.cache else None)
+    specs = cfg.get("sources", [])
     docs, sources = [], []
-    for spec in cfg.get("sources", []):
-        adapter = build_adapter(spec, cache=cache)
-        got = list(adapter.documents())
+
+    def load(spec: dict) -> list:
+        return list(build_adapter(spec, cache=cache).documents())
+
+    # Each source's own I/O (a web fetch, a directory walk) is independent
+    # of every other source's, so with more than one they load concurrently
+    # — same principle as WebAdapter's own internal concurrency. Below two
+    # sources the thread pool would be pure overhead for no benefit, so it's
+    # skipped entirely rather than spun up to run one thing. Either way,
+    # results are collected back in the config's own order: which source
+    # loads first is not something a build's output may depend on.
+    if len(specs) <= 1:
+        results = [load(spec) for spec in specs]
+    else:
+        with ThreadPoolExecutor(max_workers=min(8, len(specs))) as pool:
+            results = list(pool.map(load, specs))
+
+    for spec, got in zip(specs, results):
         docs.extend(got)
         sources.append(f"{spec['type']} ({len(got)})")
         print(f"  {spec['type']:<20} {len(got):>4} documents")

@@ -9,6 +9,7 @@ suite — rather than exercising cache.py's classes in isolation, since the
 fingerprinting is half adapter-side, half cache-side, and only meaningful
 together.
 """
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -167,3 +168,45 @@ def test_a_corrupt_cache_file_is_treated_as_empty_not_fatal():
         cache_path.write_text("not json{{{", encoding="utf-8")
         cache = BuildCache(cache_path)  # must not raise
         assert cache._data == {}
+
+
+def test_cache_survives_concurrent_sources_without_losing_hits_or_corrupting_state():
+    """cmd_build loads more than one source concurrently (one thread per
+    source) — the shared BuildCache's hit/miss counters and its on-disk
+    _data dict have to survive that without a lost update or a torn write.
+    Two obsidian sources, two separate vaults, built with --cache twice."""
+    from corpusatlas.__main__ import main
+
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        for name in ("vault1", "vault2"):
+            v = root / name
+            v.mkdir()
+            for i in range(15):
+                (v / f"Note {i}.md").write_text(f"# Note {i}\n\nSome text.", encoding="utf-8")
+
+        config = root / "corpusatlas.toml"
+        config.write_text('''
+[[sources]]
+type = "obsidian"
+path = "vault1"
+url_base = "/v1/"
+
+[[sources]]
+type = "obsidian"
+path = "vault2"
+url_base = "/v2/"
+''', encoding="utf-8")
+        out = root / "graph.json"
+        cache_path = root / "cache.json"
+
+        assert main(["build", "--config", str(config), "--out", str(out),
+                    "--cache", str(cache_path)]) == 0
+        cold_bytes = out.read_bytes()
+        cache_data = json.loads(cache_path.read_text())
+        assert len(cache_data) == 2  # one bucket per source, neither clobbered the other
+        assert all(len(bucket["files"]) == 15 for bucket in cache_data.values())
+
+        assert main(["build", "--config", str(config), "--out", str(out),
+                    "--cache", str(cache_path)]) == 0
+        assert out.read_bytes() == cold_bytes  # warm rebuild, same output
