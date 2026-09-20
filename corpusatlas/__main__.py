@@ -94,9 +94,12 @@ def cmd_build(args) -> int:
     if args.dry_run:
         print(f"\n(dry run) would write {len(nodes)} nodes, {len(edges)} edges — nothing written")
         return 0
-    counts = write_graph(Path(args.out), nodes, edges, sources=sources, ontology=ontology)
+    entity_colors = (cfg.get("ontology") or {}).get("entity_colors")
+    counts = write_graph(Path(args.out), nodes, edges, sources=sources, ontology=ontology,
+                         layout=getattr(args, "layout", False), entity_colors=entity_colors)
     print(f"\nwrote {args.out}: {counts['nodes']} nodes, {counts['edges']} edges")
     return 0
+
 
 
 def cmd_stats(args) -> int:
@@ -240,7 +243,58 @@ def cmd_diff(args) -> int:
 
     changed = bool(nodes_added or nodes_removed or nodes_changed or edges_added or edges_removed)
 
+    if getattr(args, "gui", False) and getattr(args, "out", None):
+        diff_nodes = []
+        for nid, n in new_nodes.items():
+            nd = dict(n)
+            if nid in nodes_added:
+                nd["diff"] = "added"
+            elif nid in nodes_changed:
+                nd["diff"] = "changed"
+            else:
+                nd["diff"] = "same"
+            diff_nodes.append(nd)
+        for nid in nodes_removed:
+            nd = dict(old_nodes[nid])
+            nd["diff"] = "removed"
+            diff_nodes.append(nd)
+
+        diff_edges = []
+        for ek, e in new_edges.items():
+            ed = dict(e)
+            if ek in edges_added:
+                ed["diff"] = "added"
+            else:
+                ed["diff"] = "same"
+            diff_edges.append(ed)
+        for ek in edges_removed:
+            ed = dict(old_edges[ek])
+            ed["diff"] = "removed"
+            diff_edges.append(ed)
+
+        diff_graph = {
+            "schema_version": new.get("schema_version", 1),
+            "generated": new.get("generated", ""),
+            "generator": "corpusatlas diff --gui",
+            "diff_summary": {
+                "nodes_added": len(nodes_added),
+                "nodes_removed": len(nodes_removed),
+                "nodes_changed": len(nodes_changed),
+                "edges_added": len(edges_added),
+                "edges_removed": len(edges_removed),
+            },
+            "nodes": diff_nodes,
+            "edges": diff_edges,
+        }
+        for k in ("entity_types", "context_types", "inverse_labels", "relation_groups"):
+            if k in new:
+                diff_graph[k] = new[k]
+        Path(args.out).write_text(json.dumps(diff_graph, indent=1) + "\n", encoding="utf-8")
+        print(f"wrote GUI diff graph to {args.out}")
+        return 0
+
     if getattr(args, "json", False):
+
         print(json.dumps({
             "changed": changed,
             "nodes_added": nodes_added, "nodes_removed": nodes_removed,
@@ -403,6 +457,292 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_context(args) -> int:
+    """Extracts an entity's ego-network formatted for LLM Graph RAG prompts."""
+    from .context import extract_rag_subgraph, format_rag_markdown
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    algo = getattr(args, "algorithm", "ppr")
+    top_k = int(getattr(args, "top_k", 20))
+    depth = int(getattr(args, "depth", 1))
+    alpha = float(getattr(args, "alpha", 0.15))
+
+    res = extract_rag_subgraph(
+        g,
+        args.entity,
+        algorithm=algo,
+        top_k=top_k,
+        depth=depth,
+        alpha=alpha,
+    )
+
+    if "error" in res:
+        print(res["error"], file=sys.stderr)
+        return 1
+
+    fmt = getattr(args, "format", "markdown")
+    if fmt == "json":
+        print(json.dumps(res, indent=2))
+    else:
+        print(format_rag_markdown(res))
+    return 0
+
+
+def cmd_export(args) -> int:
+    """Exports a built graph to Cypher, RDF Turtle, or DuckDB/Parquet."""
+    from .export import export_cypher, export_duckdb, export_turtle
+    from .model import Edge, Node
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    nodes = [
+        Node(
+            id=n["id"],
+            label=n["label"],
+            type=n["type"],
+            aliases=tuple(n.get("aliases") or ()),
+            meta=n.get("meta") or {},
+        )
+        for n in g.get("nodes", [])
+    ]
+    edges = [
+        Edge(
+            src=e["src"],
+            rel=e["rel"],
+            dst=e["dst"],
+            confidence=float(e.get("confidence", 1.0)),
+            explanation=e.get("explanation"),
+            prov=e.get("prov") or {},
+        )
+        for e in g.get("edges", [])
+    ]
+
+    fmt = args.format.lower()
+    if fmt == "cypher":
+        if not args.out:
+            print("export --format cypher needs --out", file=sys.stderr)
+            return 1
+        export_cypher(nodes, edges, args.out)
+        print(f"exported {len(nodes)} nodes and {len(edges)} edges to Cypher: {args.out}")
+    elif fmt == "turtle":
+        if not args.out:
+            print("export --format turtle needs --out", file=sys.stderr)
+            return 1
+        export_turtle(nodes, edges, args.out)
+        print(f"exported {len(nodes)} nodes and {len(edges)} edges to RDF Turtle: {args.out}")
+    elif fmt == "duckdb":
+        out_dir = args.out_dir or "duckdb_export"
+        res = export_duckdb(nodes, edges, out_dir)
+        print(f"exported DuckDB tables to {out_dir}:")
+        for k, v in res.items():
+            print(f"  {k}: {v}")
+    else:
+        print(f"unknown export format: {fmt}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_tile(args) -> int:
+    """Partitions graph layout into quadtree LOD tiles for client-side streaming."""
+    from .emit_tiles import generate_spatial_tiles
+    from .model import Edge, Node
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    nodes = [
+        Node(
+            id=n["id"],
+            label=n["label"],
+            type=n["type"],
+            aliases=tuple(n.get("aliases") or ()),
+            meta=n.get("meta") or {},
+        )
+        for n in g.get("nodes", [])
+    ]
+    edges = [
+        Edge(
+            src=e["src"],
+            rel=e["rel"],
+            dst=e["dst"],
+            confidence=float(e.get("confidence", 1.0)),
+            explanation=e.get("explanation"),
+            prov=e.get("prov") or {},
+        )
+        for e in g.get("edges", [])
+    ]
+
+    out_dir = args.out_dir or "tiles"
+    max_zoom = int(getattr(args, "max_zoom", 3))
+    manifest = generate_spatial_tiles(nodes, edges, out_dir, max_zoom=max_zoom)
+    print(f"generated {manifest['tile_count']} tiles across zoom 0..{max_zoom} in {out_dir}/")
+    return 0
+
+
+def cmd_audit(args) -> int:
+    """Audits graph quality, connectivity, cycle anomalies, and structural integrity."""
+    from .audit import audit_graph
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    report = audit_graph(g)
+
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+        return 0
+
+    print(f"Knowledge Graph Audit Report (Health Score: {report['health_score']}/100)")
+    print(f"  Nodes: {report['node_count']} | Edges: {report['edge_count']}")
+    print(f"  Connected components: {report['connected_components_count']} (largest: {report['largest_component_size']} nodes)")
+    print(f"  Degree Gini coefficient: {report['degree_gini_coefficient']} (hub inequality)")
+    print(f"  Average confidence: {report['average_confidence']} (low-confidence edges: {report['low_confidence_count']})")
+    print(f"  Bridge edges: {report['bridge_edges_count']}")
+    print(f"  Hierarchical cycles: {len(report['hierarchical_cycles'])}")
+    print(f"  Contradictory relationship pairs: {report['contradictory_pairs_count']}")
+
+    if report["hierarchical_cycles"]:
+        print("\n  Warning: Detected hierarchical cycles:")
+        for cycle in report["hierarchical_cycles"][:3]:
+            print(f"    {' -> '.join(cycle)}")
+
+    if report["contradictory_pairs_count"] > 0:
+        print("\n  Warning: Conflicting reciprocal relations:")
+        for contra in report["contradictions_sample"]:
+            print(f"    {contra['source']} <-> {contra['target']}: {contra['conflicting_relations']}")
+
+    return 0
+
+
+def cmd_migrate(args) -> int:
+    """Applies declarative schema migration rules to a graph artifact."""
+    from .migrate import apply_migration, load_migration_spec
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    migrations = load_migration_spec(args.migration)
+    migrated = apply_migration(g, migrations)
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(migrated, indent=2) + "\n", encoding="utf-8")
+    print(f"migrated graph written to {out_path}: {migrated['counts']['nodes']} nodes, {migrated['counts']['edges']} edges")
+    return 0
+
+
+def cmd_infer(args) -> int:
+    """Infers co-occurrence relationships from document overlap."""
+    from .infer import infer_cooccurrence
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    nodes = g.get("nodes", [])
+    edges = g.get("edges", [])
+    inferred = infer_cooccurrence(
+        nodes, edges,
+        threshold=float(getattr(args, "threshold", 0.5)),
+        min_docs=int(getattr(args, "min_docs", 2))
+    )
+    result = {
+        "graph": args.graph,
+        "inferred_count": len(inferred),
+        "inferred_edges": inferred,
+    }
+    if getattr(args, "out", None):
+        Path(args.out).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {len(inferred)} inferred edges to {args.out}")
+    else:
+        print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_publish(args) -> int:
+    """Bundles viewer and graph into a standalone static site distribution."""
+    import shutil
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    viewer_dir = Path(__file__).resolve().parents[1] / "viewer"
+    for fname in ("index.html", "style.css", "app.js"):
+        src = viewer_dir / fname
+        if src.exists():
+            shutil.copy2(src, out_dir / fname)
+
+    gsrc = Path(args.graph)
+    if not gsrc.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+    shutil.copy2(gsrc, out_dir / "graph.json")
+
+    print(f"Published static knowledge graph site to {out_dir}/")
+    print(f"Serve locally with:\n  python3 -m http.server --directory {out_dir}")
+    return 0
+
+
+def cmd_scaffold(args) -> int:
+    """Generates a schema-compliant starter TOML pack."""
+    topic = args.topic
+    slug = "-".join(topic.lower().split())
+    content = f'''# Semantic Pack: {topic}
+# Schema-conforming relations and entities for corpusatlas
+
+[[entity]]
+id = "entity:{slug}"
+label = "{topic}"
+type = "Technology"
+description = "Overview and core capabilities of {topic}."
+
+[[relation]]
+src = "entity:{slug}"
+rel = "CATEGORIZED_AS"
+dst = "entity:distributed-systems"
+confidence = 0.95
+explanation = "{topic} is categorized under distributed systems architecture."
+'''
+    target = Path(args.out)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    print(f"scaffolded pack to {target}")
+    return 0
+
+
+def cmd_watch(args) -> int:
+    """Watches source directories for changes and auto-rebuilds the graph."""
+    import time
+    cfg_path = Path(args.config)
+    if not cfg_path.exists():
+        print(f"config file not found: {args.config}", file=sys.stderr)
+        return 1
+
+    cfg = cfgmod.load(str(cfg_path))
+    sources = cfg.get("sources", [])
+    watch_dirs = [Path(s["path"]) for s in sources if "path" in s and Path(s["path"]).exists()]
+    watch_dirs.append(cfg_path)
+
+    def max_mtime() -> float:
+        m = 0.0
+        for p in watch_dirs:
+            if p.is_file():
+                m = max(m, p.stat().st_mtime)
+            elif p.is_dir():
+                for f in p.rglob("*"):
+                    if f.is_file():
+                        try:
+                            m = max(m, f.stat().st_mtime)
+                        except OSError:
+                            pass
+        return m
+
+    print(f"watching {len(watch_dirs)} source location(s)... (Press Ctrl+C to stop)")
+    last_m = max_mtime()
+    cmd_build(args)
+
+    if getattr(args, "once", False):
+        return 0
+
+    try:
+        while True:
+            time.sleep(float(getattr(args, "poll_interval", 0.5)))
+            cur_m = max_mtime()
+            if cur_m > last_m:
+                last_m = cur_m
+                print(f"[{time.strftime('%H:%M:%S')}] Changes detected, rebuilding...")
+                cmd_build(args)
+    except KeyboardInterrupt:
+        print("\nstopped watch")
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="corpusatlas")
     p.add_argument("--version", action="version", version=f"corpusatlas {__version__}")
@@ -413,6 +753,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", help="required unless --dry-run")
     b.add_argument("--dry-run", action="store_true",
                    help="report node/edge counts without writing the artifact")
+    b.add_argument("--layout", action="store_true",
+                   help="pre-calculate 2D coordinates (x, y) for nodes using force layout")
     b.add_argument("--cache",
                    help="path to a file-parse cache (html_blog/obsidian/logseq only); "
                         "created if missing, reused and updated if present")
@@ -432,9 +774,71 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--old", required=True)
     d.add_argument("--new", required=True)
     d.add_argument("--json", action="store_true", help="machine-readable output")
+    d.add_argument("--gui", action="store_true", help="export diff-annotated graph for visual inspection")
+    d.add_argument("--out", help="output file, when used with --gui")
     d.add_argument("--fail-on-change", action="store_true",
                    help="exit 1 if OLD and NEW differ at all — for a CI step asserting a no-op rebuild")
     d.set_defaults(fn=cmd_diff)
+
+    ctx = sub.add_parser("context", help="format ego-network context for LLM Graph RAG")
+    ctx.add_argument("--graph", required=True, help="path to graph.json")
+    ctx.add_argument("--entity", required=True, help="entity id or label to focus on")
+    ctx.add_argument("--algorithm", choices=["ppr", "bfs"], default="ppr", help="extraction algorithm (ppr or bfs)")
+    ctx.add_argument("--depth", type=int, default=1, choices=[1, 2], help="ego network hop depth (for bfs)")
+    ctx.add_argument("--top-k", type=int, default=20, help="max nodes to extract (for ppr)")
+    ctx.add_argument("--alpha", type=float, default=0.15, help="restart probability for PPR")
+    ctx.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    ctx.set_defaults(fn=cmd_context)
+
+    exp = sub.add_parser("export", help="export graph to Cypher, RDF Turtle, or DuckDB/Parquet")
+    exp.add_argument("--graph", required=True, help="path to graph.json")
+    exp.add_argument("--format", choices=["cypher", "turtle", "duckdb"], required=True)
+    exp.add_argument("--out", help="output file for cypher or turtle")
+    exp.add_argument("--out-dir", help="output directory for duckdb")
+    exp.set_defaults(fn=cmd_export)
+
+    til = sub.add_parser("tile", help="partition layout into quadtree LOD tiles for streaming")
+    til.add_argument("--graph", required=True, help="path to graph.json")
+    til.add_argument("--out-dir", default="tiles", help="output directory for tiles")
+    til.add_argument("--max-zoom", type=int, default=3, help="max zoom level (0..N)")
+    til.set_defaults(fn=cmd_tile)
+
+    aud = sub.add_parser("audit", help="audit graph quality, connectivity, cycle anomalies, and structural integrity")
+    aud.add_argument("--graph", required=True, help="path to graph.json")
+    aud.add_argument("--json", action="store_true", help="output audit results as JSON")
+    aud.set_defaults(fn=cmd_audit)
+
+    mig = sub.add_parser("migrate", help="apply schema migration rules to an existing graph")
+    mig.add_argument("--graph", required=True, help="path to input graph.json")
+    mig.add_argument("--migration", required=True, help="path to migration spec (.toml or .json)")
+    mig.add_argument("--out", required=True, help="path to output migrated graph.json")
+    mig.set_defaults(fn=cmd_migrate)
+
+    inf = sub.add_parser("infer", help="infer latent co-occurrence relationships")
+    inf.add_argument("--graph", required=True, help="path to graph.json")
+    inf.add_argument("--out", help="output json path")
+    inf.add_argument("--threshold", type=float, default=0.5, help="Jaccard overlap threshold (0.0 to 1.0)")
+    inf.add_argument("--min-docs", type=int, default=2, help="minimum shared documents")
+    inf.set_defaults(fn=cmd_infer)
+
+    pub = sub.add_parser("publish", help="bundle viewer and graph into a static site distribution")
+    pub.add_argument("--graph", required=True, help="path to built graph.json")
+    pub.add_argument("--out-dir", required=True, help="output directory for static bundle")
+    pub.set_defaults(fn=cmd_publish)
+
+    scf = sub.add_parser("scaffold", help="generate schema-compliant starter TOML pack")
+    scf.add_argument("--topic", required=True, help="topic or domain name")
+    scf.add_argument("--out", required=True, help="output toml file path")
+    scf.set_defaults(fn=cmd_scaffold)
+
+    wtc = sub.add_parser("watch", help="watch source directories and auto-rebuild on change")
+    wtc.add_argument("--config", default="corpusatlas.toml")
+    wtc.add_argument("--out", required=True)
+    wtc.add_argument("--poll-interval", type=float, default=0.5)
+    wtc.add_argument("--once", action="store_true", help="run single scan and exit")
+    wtc.add_argument("--layout", action="store_true")
+    wtc.add_argument("--cache")
+    wtc.set_defaults(fn=cmd_watch)
 
     c = sub.add_parser("convert", help="reformat a built graph as GraphML or CSV")
     c.add_argument("--graph", required=True)
@@ -462,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
     return args.fn(args)
+
 
 
 if __name__ == "__main__":

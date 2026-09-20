@@ -1,0 +1,5 @@
+# Psittacopasseres
+
+Wikipedia article for Psittacopasseres.
+
+Psittacopasseres is a taxon of birds consisting of the Passeriformes (passerines, a large group of perching birds) and Psittaciformes (parrots). Per Ericson and colleagues, in analysing genomic DNA, revealed a lineage comprising passerines, psittacines and Falconiformes. The group was proposed following an alignment of nuclear intron sequences by Shannon Hackett et al. in 2008. It was formally named as Psittacopasserae in a 2011 Nature Communications article by Alexander Suh and other authors working with Jürgen Schmitz's group, based on genetic analysis of the insertion of retroposons into the genomes of key avian lineages over the course of evolution during the Mesozoic Era. This clade was defined in the PhyloCode by George Sangster and colleagues in 2022 as the least inclusive crown clade containing Psittacus erithacus and Passer domesticus.

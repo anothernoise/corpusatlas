@@ -7,6 +7,36 @@ which has the full argument, the FAQ, and the search/library comparisons this
 doc leaves out. Read that first if you want the narrative; read this if you
 want the decision points without the story.
 
+## Executive summary: the knowledge graph as a compiler
+
+`corpusatlas` treats knowledge graph generation as a **static build-time compiler** problem rather than an operational database problem:
+
+```mermaid
+flowchart LR
+    subgraph Sources["Corpus Sources"]
+        S1["Markdown Notes (Obsidian / Logseq)"]
+        S2["HTML Blog"]
+        S3["Architecture Radar & Scorecards"]
+        S4["Curated Entity Packs"]
+        S5["Web Pages (URLs)"]
+    end
+
+    Sources --> Adapters["Adapters (concurrency + cache)"]
+    Adapters --> Documents["Document Envelopes"]
+    Documents --> Resolver["Resolver (entities.toml)"]
+    Resolver --> Extraction["3-Tier Extraction"]
+    Extraction --> Merge["Merge, Retract & Prune"]
+    Merge --> Emit["Emission (graph.json)"]
+    Emit --> Targets["Static Consumers (CDN / Browser / Exports)"]
+```
+
+For corpora under ~20,000 documents, graph databases (Neo4j, RDF triple stores) and dynamic GraphRAG indexing daemons introduce server management, availability risks, latency, and hosting costs with no payoff. The entire graph easily fits in memory and can be served as a static JSON file directly to client browsers, visualizers, or downstream tools.
+
+Three core engineering invariants govern the design:
+1. **Zero third-party dependencies**: Built entirely on the Python 3.11+ standard library (`dataclasses`, `tomllib`, `urllib`, `concurrent.futures`, `html.parser`). No supply-chain drift, no heavy packaging footprint.
+2. **Deterministic, bit-identical builds**: Given identical source files, compilation yields byte-identical output with stable sorting across nodes, edges, and metadata keys. No arbitrary commit diffs on no-op rebuilds.
+3. **Closed-world ontology enforcement**: Triples are strictly typechecked against a closed schema at compile time. Ill-typed or undeclared relationships fail the build rather than polluting the graph with open-vocabulary drift.
+
 ## The question that decides the architecture
 
 Corpus size is the variable most knowledge-graph guides never state, because
@@ -25,19 +55,57 @@ boundary as much as raw count does. This module is built for the top row and
 works into the second; past that, the tradeoffs this repo makes (one writer,
 no auth, ship the whole file) start working against you rather than for you.
 
+### Concurrency, I/O and performance architecture
+
 **What "fits in memory" actually measures like.** `scripts/profile_scale.py`
 builds a synthetic, cross-linked corpus and times every pipeline stage —
-real numbers, not the claim restated. At 5,000 documents (shirokoff.ca
-itself is ~350): 8.2s total, 74MB peak Python-level allocation
-(`tracemalloc`), a 12.9MB `graph.json`. At 20,000 (4x): 27.1s, 295MB, 52MB
-— scaling roughly linearly, not quadratically, in every stage. Where the
-time actually goes, at either size: **adapter parsing dominates** (~50-59%
-— this is exactly what `--cache` exists to skip on a rebuild), the
-**mentions tier** is the one extraction stage worth naming (~19-23%, word-
-boundary scanning over every document's full text), and **JSON
-serialisation** is a comparable, easy-to-forget cost (~19-23%) since it's
-outside "extraction" entirely. The deterministic tier, packs and merge are
-all near-zero regardless of size.
+real numbers, not the claim restated:
+
+| Corpus size | Total build time | Peak RAM (`tracemalloc`) | Output artifact (`graph.json`) |
+| :--- | :--- | :--- | :--- |
+| **~350 docs** (typical blog) | ~0.6s | ~18 MB | ~1.2 MB |
+| **5,000 docs** | 8.2s | 74 MB | 12.9 MB |
+| **20,000 docs** (4x) | 27.1s | 295 MB | 52.0 MB |
+
+#### Real-world corpus benchmark: 1,000 Wikipedia animal articles
+
+To measure behavior against real-world, cross-linked prose with a rich domain ontology, `scripts/fetch_wikipedia_animals.py` fetches 1,000 Wikipedia animal articles via batched MediaWiki API queries, materializing an Obsidian-compatible vault and domain registry. `scripts/benchmark_animals.py` benchmarks cold and warm compilation:
+
+| Metric | Cold Build (No Cache) | Warm Rebuild (`BuildCache`) |
+| :--- | :--- | :--- |
+| **Documents / Notes** | 1,000 notes (`obsidian` adapter) | 1,000 notes (`obsidian` adapter) |
+| **Entity Registry** | 1,000 `Animal` entities | 1,000 `Animal` entities |
+| **Graph Output** | 1,899 nodes, 1,657 edges | 1,899 nodes, 1,657 edges |
+| **Total Build Time** | **13.81s** | **13.27s** (Adapter: 0.008s, 100% cache hit) |
+| **Peak RAM Allocation** | **7.74 MB** | **6.30 MB** |
+| **Artifact Size (`graph.json`)** | 680 KB (0.65 MB) | 680 KB (0.65 MB) |
+
+**Stage breakdown (1,000 docs $\times$ 1,000 entity patterns):**
+- **Mentions scanning (`MentionsExtractor`)**: ~13.3s (96.3% of total). Scanning 1,000 regex boundary patterns across 1,000 documents (1,000,000 evaluations) dominates execution.
+- **Adapter parsing (`ObsidianAdapter`)**: ~0.46s cold, ~0.008s warm with `BuildCache`.
+- **Deterministic extraction & Resolution**: ~0.04s.
+- **Graph merge & JSON emission**: ~0.02s.
+
+Reproduce with:
+```bash
+python3 scripts/fetch_wikipedia_animals.py 1000
+python3 scripts/benchmark_animals.py
+python3 -m http.server 8765 --directory viewer
+# Open http://localhost:8765/
+```
+
+Build time and memory scale roughly linearly, not quadratically, in every stage.
+Where the wall-clock time actually goes across corpus sizes:
+1. **Adapter parsing dominates (~50–59%)**: Walking directories, markdown/HTML AST parsing, and link extraction. This is precisely what `--cache` exists to skip on rebuilds.
+2. **Mentions scanning (~19–23%)**: The only extraction stage reading unstructured prose, evaluating precompiled word-boundary regex patterns over every document's text.
+3. **JSON serialization (~19–23%)**: Formatting and writing the final artifact (`emit.py`), an easy-to-forget cost outside "extraction" entirely.
+4. **Deterministic tier, curated packs, and merge (~1–3%)**: In-memory dictionary lookups and set operations remain near-zero cost regardless of corpus size.
+
+**Concurrency and I/O optimizations:**
+- **Concurrent multi-source loading**: When multiple `[[sources]]` are declared in `corpusatlas.toml`, `cmd_build` loads them concurrently via `concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(specs)))`. Results are collected back in configured order to ensure build determinism.
+- **Whole-corpus fingerprint caching (`BuildCache`)**: For `obsidian`, `logseq`, and `html_blog` adapters, an opt-in cache tracks file mtimes, sizes, and inodes. If the whole-corpus fingerprint matches, disk reads and document parsing are bypassed entirely. A threading lock ensures safe concurrent updates across adapter threads.
+- **Web adapter persistent connection pooling**: The `web` adapter maintains persistent HTTP/HTTPS connections per `(worker_thread, host)` via an internal `_ConnectionPool`, eliminating redundant TLS handshakes. It fetches pages concurrently (`max_workers=8`), respects `robots.txt` with shared cross-thread `Crawl-delay` synchronization, and deduplicates URL variants (`/path/`, `/path`, fragments) into canonical documents.
+- **Viewer layout scaling**: The standalone WebGL viewer (`viewer/index.html`, built on Sigma.js and Graphology) automatically engages the Barnes-Hut $O(n \log n)$ approximation when node count exceeds `order > 200` (lowered from an earlier 2,000 cliff), avoiding brute-force $O(n^2)$ repulsive force calculations on mid-sized graphs.
 
 This is also the answer to "should extraction run in parallel processes":
 investigated, not implemented. At 20,000 documents the only genuinely
@@ -51,6 +119,97 @@ as slow — corpusatlas's one real consumer today is 70x smaller than the
 size tested here. Worth revisiting if a corpus this large and this
 mention-heavy actually shows up; not worth building against a corpus that
 doesn't exist yet.
+
+## Core architectural pillars and pipeline dataflow
+
+The compiler pipeline processes data through five well-defined stages using immutable dataclass primitives:
+
+```mermaid
+flowchart TD
+    subgraph S1["1. Ingestion Stage"]
+        Src["Corpus Sources (Files / URLs)"] --> Adp["Adapters (concurrency + cache)"]
+        Adp --> Docs["Document Objects"]
+    end
+
+    subgraph S2["2. Entity Resolution"]
+        Docs --> Res["Resolver (entities.toml)"]
+    end
+
+    subgraph S3["3. Layered Extraction (Precedence Order)"]
+        Res --> T1["Tier 1: Deterministic Extractor (links, tags, scorecards)"]
+        T1 --> T2["Tier 2: Curated Packs Extractor (explicit claims)"]
+        T2 --> T3["Tier 3: Mentions Scanner (vocabulary regex)"]
+    end
+
+    subgraph S4["4. Merge & Retraction"]
+        T1 --> Mrg["Merge Engine (first-writer-wins)"]
+        T2 --> Mrg
+        T3 --> Mrg
+        Live["Live Document IDs"] --> Retract["Retract Claims of Deleted Docs"]
+        Mrg --> Retract
+        Retract --> Prune["Prune Isolated Nodes"]
+    end
+
+    subgraph S5["5. Emission & Export"]
+        Prune --> OutJson["graph.json (Schema v1)"]
+        Prune --> OutRdf["Turtle (RDF with Reification)"]
+        Prune --> OutNeo["Neo4j CSV"]
+        Prune --> OutGml["GraphML"]
+    end
+```
+
+### 1. Minimalist immutable data primitives (`model.py`)
+All components agree on three frozen dataclasses:
+- **`Document`**: The universal envelope yielded by every adapter (`id`, `title`, `url`, `kind`, `date`, `text`, `tags`, `links`, `meta`). Core extractors never inspect adapter internals.
+- **`Node`**: The graph vertex. Contains `id`, `label`, `type` (validated against the ontology), optional `url`, `meta`, `aliases`, and `urls` dictionary (canonical / wikipedia links). Serialized with calculated `degree`.
+- **`Edge`**: Directed relationship defined by `src`, `rel`, `dst`. Identity key is `(src, rel, dst, scope or "")`—ensuring scoped editorial claims (e.g., comparing tools for "streaming" vs "batch") remain distinct. Carries `prov` (provenance dictionary), `confidence` ($0.0 \dots 1.0$), `sources` (citation URLs), and a human-readable `explanation`.
+
+### 2. Closed-world ontology system (`ontology.py`)
+- **Entity vs. Context split**: Nodes are partitioned strictly into `entity_types` (what the graph is *about*, drawn on the canvas) and `context_types` (where claims were *published*, shown as links on cards).
+- **Strict type signatures**: Every relation declares allowed `(source_types, target_types)`. Triples violating signatures halt compilation.
+- **Relation normalisation**: Inverses (e.g. `IMPLEMENTED_BY`) are canonicalized to their primary form (`IMPLEMENTS`). Symmetric relations (e.g. `COMPARES_TO`) are canonically sorted `(min(a, b), max(a, b))` to guarantee single-edge representation.
+- **Self-describing DOT export**: `corpusatlas ontology-check --dot` renders the schema's type/relation graph as Graphviz DOT.
+
+```mermaid
+flowchart TD
+    subgraph ClosedOntology["Closed-World Ontology"]
+        direction TB
+        subgraph Entities["Entity Types (Subjects)"]
+            E1["Technology"]
+            E2["ArchitecturePattern"]
+            E3["Product / Concept / CloudService"]
+        end
+
+        subgraph Context["Context Types (Evidence)"]
+            C1["Document (Article)"]
+            C2["Assessment"]
+            C3["RadarEntry / Topic"]
+        end
+
+        Entities -->|"Semantic Relations (IMPLEMENTS, RUNS_ON, ALTERNATIVE_TO)"| Entities
+        Context -->|"Context Relations (ABOUT, COVERS, ASSESSES)"| Entities
+    end
+
+    Entities -->|"Drawn as explorable nodes"| Canvas["Canvas Graph Viewer"]
+    Context -->|"Rendered as evidence links"| Cards["Entity Detail Cards"]
+```
+
+### 3. Layered extraction hierarchy & first-writer-wins precedence
+Extraction runs in three sequential tiers where **earlier tiers take absolute precedence**:
+1. **Tier 1 — Deterministic (`deterministic.py`)**: Human-authored explicit structure (wikilinks, tags, scorecard options, radar calls).
+2. **Tier 2 — Curated Packs (`packs.py`)**: Curated entity/relation packs. Requires explicit `confidence` and `explanation`. Ill-typed triples fail the build.
+3. **Tier 3 — Extracted Mentions (`mentions.py`)**: Word-boundary regex scanning over prose. Operates *only* over the vocabulary produced by Tiers 1 and 2. Acronyms ($\le 6$ chars, all-caps) and long forms ($\ge 10$ chars) link on 1 occurrence; shorter alias forms require $\ge 2$ occurrences.
+
+### 4. Merge, retraction, and pruning semantics (`merge.py`)
+- **First-writer-wins enrichment**: If an entity is emitted by multiple extractors, the first writer's `label` and `type` are permanent. Subsequent extractors can only enrich empty fields, merge dictionary metadata, or append novel aliases.
+- **Document-driven claim retraction**: Every edge carries `prov.doc`. When a document is removed from the corpus, all claims asserted by that document are retracted during `merge()`.
+- **Orphan node elimination**: Any entity with zero incoming or outgoing edges after edge filtering is automatically pruned, preventing disconnected noise in visualizers.
+
+### 5. Multi-target export & serialization (`emit.py`, `convert`)
+- **`graph.json`**: Primary output with `schema_version = 1`. Formatted with deterministic sort orders for byte-identical reproducibility.
+- **W3C Turtle / RDF**: `corpusatlas convert --format turtle` emits RDF triples under a configurable `--base` IRI. Uses standard `rdf:Statement` reification for provenance, confidence, and scope, preserving full compatibility with standard SPARQL 1.1 engines without requiring RDF-star extensions.
+- **Neo4j CSV**: `convert --format neo4j` generates node and relationship CSVs formatted for direct ingestion via `neo4j-admin database import`.
+- **GraphML**: `convert --format graphml` emits typed GraphML XML for Gephi and Cytoscape.
 
 ## Mine the structure you already wrote
 

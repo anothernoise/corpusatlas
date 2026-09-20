@@ -128,3 +128,87 @@ class CacheBucket:
             "fingerprint": list(fingerprint),
             "files": self._new_files,
         })
+
+
+class MerkleDAGCache:
+    """Fine-grained Merkle-DAG cache for extractor tier claims.
+
+    Tracks SHA256 hashes of input document contents, schema versions,
+    and output claims (nodes & edges) to bypass extractor re-execution
+    on unchanged documents.
+    """
+
+    def __init__(self, path: Path | None = None):
+        self.path = path
+        self._entries: dict[str, dict[str, Any]] = {}
+        if path is not None and path.exists():
+            try:
+                self._entries = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                self._entries = {}
+
+    def _claim_key(self, doc_id: str, doc_hash: str, tier_name: str) -> str:
+        h = hashlib.sha256(f"{doc_id}:{doc_hash}:{tier_name}".encode("utf-8")).hexdigest()
+        return f"{doc_id}:{h}"
+
+    def get_claims(
+        self, doc_id: str, doc_hash: str, tier_name: str
+    ) -> tuple[list[dict], list[dict]] | None:
+        key = self._claim_key(doc_id, doc_hash, tier_name)
+        entry = self._entries.get(key)
+        if entry:
+            return entry.get("nodes", []), entry.get("edges", [])
+        return None
+
+    def put_claims(
+        self,
+        doc_id: str,
+        doc_hash: str,
+        tier_name: str,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> None:
+        key = self._claim_key(doc_id, doc_hash, tier_name)
+        # Compute leaf Merkle hash over claims
+        claims_bytes = json.dumps({"nodes": nodes, "edges": edges}, sort_keys=True).encode("utf-8")
+        leaf_hash = hashlib.sha256(claims_bytes).hexdigest()
+        self._entries[key] = {
+            "doc_id": doc_id,
+            "doc_hash": doc_hash,
+            "tier": tier_name,
+            "merkle_leaf": leaf_hash,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+    def compute_merkle_root(self) -> str:
+        """Compute the Merkle tree root hash across all cached document claims."""
+        if not self._entries:
+            return hashlib.sha256(b"empty").hexdigest()
+
+        # Sort leaves deterministically
+        leaves = [
+            e.get("merkle_leaf", "")
+            for _, e in sorted(self._entries.items(), key=lambda kv: kv[0])
+        ]
+        curr = [bytes.fromhex(l) for l in leaves if l]
+        if not curr:
+            return hashlib.sha256(b"empty").hexdigest()
+
+        while len(curr) > 1:
+            next_level = []
+            for i in range(0, len(curr), 2):
+                left = curr[i]
+                right = curr[i + 1] if i + 1 < len(curr) else left
+                parent = hashlib.sha256(left + right).digest()
+                next_level.append(parent)
+            curr = next_level
+
+        return curr[0].hex()
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self._entries, sort_keys=True, indent=2), encoding="utf-8")
+

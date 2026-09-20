@@ -1,0 +1,6 @@
+# Moa
+
+Wikipedia article for Moa.
+
+Moa (order Dinornithiformes) are an extinct group of flightless birds formerly endemic to New Zealand. During the Late Pleistocene-Holocene, there were nine species, in six genera. The two largest species, Dinornis robustus and Dinornis novaezelandiae, reached about 3.6 metres (12 ft) in height with neck outstretched, and weighed about 230 kilograms (510 lb); the smallest, the bush moa (Anomalopteryx didiformis), was about the size of a turkey. Estimates of the moa population when Polynesians settled New Zealand circa 1300 C.E. range from 58,000 to 2.5 million.
+Moa are traditionally placed in the ratite group. Genetic studies have found that their closest relatives are the flighted South American tinamous, once considered a sister group to ratites. The nine species of moa were the only entirely wingless birds, lacking even vestigial wings, which all other ratites have. They were the largest terrestrial animals and dominant herbivores in New Zealand's forest, shrubland, and subalpine ecosystems until the arrival of the Māori, and were hunted only by Haast's eagle. Moa extinction occurred within 100 years of human settlement of New Zealand, primarily because of overhunting.

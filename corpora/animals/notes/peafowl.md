@@ -1,0 +1,7 @@
+# Peafowl
+
+Wikipedia article for Peafowl.
+
+Peafowl is a common name for two bird species of the genus Pavo and one species of the closely related genus Afropavo within the tribe Pavonini of the family Phasianidae (the pheasants and their allies). Male peafowl are referred to as peacocks, and female peafowl are referred to as peahens. Despite this, peacock is usually used to refer to both sexes, in common language.
+The two Asiatic species are the blue or Indian peafowl originally from the Indian subcontinent, and the green peafowl from Southeast Asia. The third peafowl species, the Congo peafowl, is native only to the Congo Basin. Male peafowl are known for their piercing calls and their extravagant plumage. The latter is especially prominent in the Asiatic species, which have an eye-spotted "tail" or "train" of covert feathers, which they display as part of a courtship ritual.
+The functions of the elaborate iridescent coloration and large "train" of peacocks have been the subject of extensive scientific debate. Charles Darwin suggested that they served to attract females, and the showy features of the males had evolved by sexual selection. More recently, Amotz Zahavi proposed in his handicap principle that these features acted as honest signals of the males' fitness, since less-fit males would be disadvantaged by the difficulty of surviving with such large and conspicuous structures.

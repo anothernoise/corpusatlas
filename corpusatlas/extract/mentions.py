@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 
+from ..aho_corasick import AhoCorasick
 from ..model import Document, Edge, Node
 from ..ontology import DEFAULT, Ontology
 from ..resolve import Resolver
@@ -58,11 +59,12 @@ class MentionsExtractor:
     tier = "extracted"
 
     def __init__(self, vocabulary: list[Node], resolver: Resolver | None = None,
-                ontology: Ontology = DEFAULT):
+                 ontology: Ontology = DEFAULT):
         resolver = resolver or Resolver()
-        # One compiled pattern per entity, built once, so a few hundred
-        # articles scan in a second or two.
-        self._entries: list[tuple[str, re.Pattern | None, re.Pattern]] = []
+        self._ac_ci = AhoCorasick(case_sensitive=False)
+        self._ac_cs = AhoCorasick(case_sensitive=True)
+        self._registered_entities: set[str] = set()
+
         seen: set[str] = set()
         for n in vocabulary:
             if n.type not in ontology.entity_types or n.type in NOT_MENTIONED or n.id in seen:
@@ -78,15 +80,17 @@ class MentionsExtractor:
             forms = {f for f in forms if _trusted(f)}
             if not forms:
                 continue
-            flags = 0 if reg.get("case_sensitive") else re.IGNORECASE
-            # Judged per form, not per entity: one hit on a long, distinctive
-            # name ("Amazon EMR") is a claim, but a short alias of the same
-            # entity ("EMR") has to show up twice on its own merits.
-            long_forms = {f for f in forms if len(f) >= LONG}
-            any_pattern = _pattern(forms, flags)
-            assert any_pattern is not None  # forms was already checked non-empty above
-            self._entries.append((n.id, _pattern(long_forms, flags), any_pattern))
-        self._entries.sort(key=lambda x: x[0])
+
+            self._registered_entities.add(n.id)
+            is_cs = bool(reg.get("case_sensitive"))
+            ac = self._ac_cs if is_cs else self._ac_ci
+
+            for f in forms:
+                is_long = len(f) >= LONG
+                ac.add_word(f, (n.id, is_long))
+
+        self._ac_ci.build()
+        self._ac_cs.build()
 
     def run(self, docs: list[Document]):
         edges: list[Edge] = []
@@ -94,14 +98,39 @@ class MentionsExtractor:
             if d.kind != "article" or not d.text:
                 continue
             prov = {"doc": d.id, "tier": self.tier, "extractor": self.name, "via": "mention"}
-            for eid, long_pattern, any_pattern in self._entries:
-                if (long_pattern and long_pattern.search(d.text)) or len(any_pattern.findall(d.text)) >= 2:
+
+            # Collect matches per entity: (start, end, is_long)
+            entity_matches: dict[str, list[tuple[int, int, bool]]] = {}
+
+            # Scan with case-insensitive automaton
+            for start, end, _, payload in self._ac_ci.find_matches(d.text, word_boundaries=True):
+                eid, is_long = payload
+                entity_matches.setdefault(eid, []).append((start, end, is_long))
+
+            # Scan with case-sensitive automaton
+            for start, end, _, payload in self._ac_cs.find_matches(d.text, word_boundaries=True):
+                eid, is_long = payload
+                entity_matches.setdefault(eid, []).append((start, end, is_long))
+
+            # Filter candidates in deterministic order
+            for eid in sorted(entity_matches.keys()):
+                matches = entity_matches[eid]
+                # Check if any long form matched
+                has_long = any(is_long for _, _, is_long in matches)
+                if has_long:
                     edges.append(Edge(d.id, "COVERS", eid, dict(prov)))
+                    continue
+
+                # Count non-overlapping occurrences for short forms
+                # Sort by end position (greedy interval scheduling)
+                matches.sort(key=lambda m: (m[1], m[0]))
+                count = 0
+                last_end = -1
+                for start, end, _ in matches:
+                    if start >= last_end:
+                        count += 1
+                        last_end = end
+                if count >= 2:
+                    edges.append(Edge(d.id, "COVERS", eid, dict(prov)))
+
         return [], edges
-
-
-def _pattern(forms: set[str], flags: int) -> re.Pattern | None:
-    if not forms:
-        return None
-    alternatives = "|".join(re.escape(f) for f in sorted(forms, key=lambda f: (-len(f), f)))
-    return re.compile(r"(?<![\w-])(?:" + alternatives + r")(?![\w-])", flags)

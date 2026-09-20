@@ -1,0 +1,114 @@
+# Animals & Ecology Domain Ontology
+entity_types  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Habitat", "Diet", "Taxon", "Animal"]
+context_types = ["Document", "Assessment", "RadarEntry", "Topic"]
+
+# Trophic Interactions
+[[relation]]
+name   = "PREYS_ON"
+source = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+group  = "Trophic"
+
+[[relation]]
+name      = "COMPETES_WITH"
+source    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+group     = "Trophic"
+symmetric = true
+
+[[relation]]
+name      = "SYMBIOTIC_WITH"
+source    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+group     = "Trophic"
+symmetric = true
+
+# Ecological Biome & Diet
+[[relation]]
+name   = "FOUND_IN"
+source = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target = ["Habitat"]
+group  = "Ecology"
+
+[[relation]]
+name   = "CONSUMES"
+source = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target = ["Diet"]
+group  = "Ecology"
+
+# Taxonomy
+[[relation]]
+name   = "BELONGS_TO_TAXON"
+source = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal", "Taxon"]
+target = ["Taxon"]
+group  = "Taxonomy"
+
+# Comparative Ecology
+[[relation]]
+name      = "COMPARES_TO"
+source    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+group     = "Comparative"
+symmetric = true
+
+[[relation]]
+name      = "ALTERNATIVE_TO"
+source    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target    = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+group     = "Comparative"
+symmetric = true
+
+# Context relations
+[[relation]]
+name    = "REFERENCES"
+source  = ["Document"]
+target  = ["Document"]
+context = true
+
+[[relation]]
+name    = "COVERS"
+source  = ["Document"]
+target  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Habitat", "Diet", "Taxon", "Animal"]
+context = true
+
+[[relation]]
+name    = "ABOUT"
+source  = ["Document"]
+target  = ["Habitat", "Diet", "Taxon", "Topic"]
+context = true
+
+[[relation]]
+name    = "HAS_RADAR_ENTRY"
+source  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+target  = ["RadarEntry"]
+context = true
+
+[[relation]]
+name    = "ASSESSED_IN"
+source  = ["RadarEntry"]
+target  = ["Assessment"]
+context = true
+
+[[relation]]
+name    = "DOCUMENTED_IN"
+source  = ["RadarEntry"]
+target  = ["Document", "Assessment"]
+context = true
+
+[[relation]]
+name    = "ASSESSES"
+source  = ["Assessment"]
+target  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Animal"]
+context = true
+
+[[relation]]
+name    = "PRIMARY_TOPIC_OF"
+source  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Habitat", "Diet", "Taxon", "Animal"]
+target  = ["Document", "Assessment"]
+context = true
+
+[[relation]]
+name    = "DISCUSSED_IN"
+source  = ["Mammal", "Bird", "Reptile", "Amphibian", "Fish", "Invertebrate", "Habitat", "Diet", "Taxon", "Animal"]
+target  = ["Document", "Assessment"]
+context = true

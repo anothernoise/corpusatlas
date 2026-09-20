@@ -1,0 +1,6 @@
+# Anatidae
+
+Wikipedia article for Anatidae.
+
+The Anatidae are the biological family of water birds that includes ducks, geese, and swans. The family has a cosmopolitan distribution, occurring on all the world's continents except Antarctica. These birds are adapted for swimming, floating on the water surface, and, in some cases, diving in at least shallow water. The family contains around 174 species in 43 genera.
+They are generally herbivorous and are monogamous breeders. A number of species undertake annual migrations. A few species have been domesticated for agriculture, and many others are hunted for food and recreation. Five species have become extinct since 1600, and many more are threatened with extinction.

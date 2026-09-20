@@ -1,0 +1,10 @@
+# Felidae
+
+Wikipedia article for Felidae.
+
+Felidae ( FEE-lə-dee) is the family of mammals in the order Carnivora colloquially referred to as cats. A member of this family is also called a felid ( FEE-lid, -⁠ləd).
+The 41 officially recognized extant Felidae species exhibit the greatest diversity in fur patterns of all terrestrial carnivores. Cats have retractile claws, slender muscular bodies and strong flexible forelimbs. Their teeth and facial muscles allow for a powerful bite. They are all obligate carnivores, and most are solitary predators ambushing or stalking their prey. Some wild cat species are adapted to forest and savanna habitats, some to arid environments, and a few also to wetlands and mountainous terrain. Their activity patterns range from nocturnal and crepuscular to diurnal, depending on their preferred prey species.
+Reginald Innes Pocock divided the extant Felidae into three subfamilies: the Pantherinae, the Felinae and the Acinonychinae, differing from each other by the ossification of the hyoid apparatus and by the cutaneous sheaths which protect their claws.
+This concept has been revised following developments in molecular biology and techniques for the analysis of morphological data. Today, the living Felidae are divided into two subfamilies: the Pantherinae and Felinae, with the Acinonychinae subsumed into the latter. Pantherinae includes five Panthera and two Neofelis species, while Felinae includes the other 34 species in 12 genera.
+The first cats emerged during the Oligocene about 25 million years ago, with the appearance of Proailurus and Pseudaelurus. The latter species complex was ancestral to two main lines of felids: the cats in the extant subfamilies, and the "saber-toothed cats" of the extinct subfamily Machairodontinae, including the famous saber-toothed tiger.
+The "false saber-toothed cats", the Barbourofelidae and Nimravidae, are not true cats, but are closely related. Together with the Felidae, Viverridae, Nandiniidae, Eupleridae, hyenas, and mongooses, they constitute the Feliformia.

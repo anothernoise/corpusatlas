@@ -1,0 +1,6 @@
+# Struthionidae
+
+Wikipedia article for Struthionidae.
+
+Struthionidae (; from Latin  strūthiō 'ostrich' and Ancient Greek  εἶδος (eîdos) 'appearance, resemblance') is a family of flightless birds, containing the extant ostriches and their extinct relatives. The two extant species of ostrich are the common ostrich and Somali ostrich, both in the genus Struthio, which also contains several species known from Holocene fossils such as the Asian ostrich. The common ostrich is the more widespread of the two living species, and is the largest living bird species. Species of the extinct genus Pachystruthio from the Late Pliocene-Early Pleistocene of Eurasia are some of the largest birds ever.
+The first species of Struthio appear during the Miocene epoch, though various Paleocene, Eocene, and Oligocene fossils may also belong to the family. Ostriches are classified in the ratite group of birds, all extant species of which are flightless, including the kiwis, emus, and rheas. Traditionally, the order Struthioniformes contained all the ratites. However, recent genetic analysis has found that the group is not monophyletic, as it is paraphyletic with respect to the tinamous, so the ostriches are usually classified as the only members of the order, though the IUCN uses a broader classification and includes all "ratites" and tinamous in Struthioniformes.

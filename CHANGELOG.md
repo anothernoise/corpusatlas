@@ -4,6 +4,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.9.0] — 2026-09-19
+
+### Added
+- **Multi-Format Graph Export & Native DuckDB / Parquet Engine (`corpusatlas export`)**:
+  - Direct export to high-performance DuckDB databases, Apache Parquet files, Cypher query statements (`.cql`), and W3C RDF Turtle (`.ttl`).
+  - Automatically compiles native `.duckdb` and `.parquet` files via the system DuckDB CLI when available, without introducing any external Python pip dependencies.
+- **Personalized PageRank (PPR) Graph RAG Subgraph Extractor (`corpusatlas context --algorithm ppr`)**:
+  - Implements random walk with restart power iteration to extract tightly bound multi-hop semantic contexts for LLM prompts.
+  - Supports `--algorithm ppr|bfs`, `--top-k <N>`, `--depth 1|2`, and `--format markdown|json`.
+- **Automated Knowledge Graph Quality & Topological Auditing (`corpusatlas audit`)**:
+  - Calculates degree Gini centralization index, Tarjan's bridge bottleneck detection, cycle detection in hierarchical relations, and conflicting reciprocal relations.
+- **Spatial Quadtree LOD Tiling (`corpusatlas tile`)**:
+  - Partitions 2D layout coordinates into a multi-resolution quadtree pyramid (`tiles/{z}/{x}_{y}.json`) and `manifest.json` for client-side streaming of massive graphs without full monolithic loads.
+- **Declarative Ontology Schema Refactoring (`corpusatlas migrate`)**:
+  - Allows in-place migration of node types, relationship names, and schema evolutions (`rename_type`, `rename_relation`, `split_type`, `drop_type`) on existing `graph.json` files without full corpus rebuilds.
+- **Barnes-Hut $O(N \log N)$ Quadtree Layout**:
+  - 2D force-directed layout engine using recursive quadtree spatial decomposition with center-of-mass multipole approximation (`--layout`), scaling to tens of thousands of nodes in seconds.
+- **Aho-Corasick Linear-Time Mention Scanner (`mentions@2`)**:
+  - $O(L + M)$ linear-time multi-pattern trie with BFS failure links, dictionary output chains, and boundary checks.
+- **Out-of-Core SQLite Pipeline Store (`SQLitePipelineStore`)**:
+  - Disk-backed streaming pipeline store for memory-bounded ingestion, first-writer-wins deduplication, retraction, and JSON serialization.
+- **Merkle-DAG Incremental Cache (`MerkleDAGCache`)**:
+  - Fine-grained content-addressable SHA-256 tree over extractor tier claims, invalidating only touched documents on rebuilds.
+- **Context-Aware Entity Disambiguation (`ContextDisambiguator`)**:
+  - Disambiguates polysemous homographs by computing token overlap against candidate profiles.
+- **Modern Interactive Viewer**:
+  - Layout switcher (ForceAtlas2 / Barnes-Hut / Circular), Dark/Light theme toggle, Zoom controls, Minimap, Fullscreen mode, Search filter, and Interactive edge card inspector.
+- **Rebuilt Animals Knowledge Pack**:
+  - 2,992 nodes and 268,725 edges with multi-typed biological classes (`Mammal`, `Bird`, `Reptile`, `Amphibian`, `Fish`, `Invertebrate`, `Habitat`, `Diet`, `Taxon`), 416 curated semantic relations across 4 groups (`Trophic`, `Ecology`, `Taxonomy`, `Comparative`), and conservation status recommendations.
+
 ## [0.8.0] — 2026-09-19
 
 ### Added

@@ -1,245 +1,244 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>corpusatlas graph viewer</title>
-<style>
-  html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9;
-    font: 14px/1.4 -apple-system, system-ui, sans-serif; }
-  #stage { position: absolute; inset: 0; }
-  #hud { position: absolute; top: 12px; left: 12px; width: 260px;
-    background: rgba(13,17,23,0.85); border: 1px solid #30363d; border-radius: 8px;
-    padding: 10px 14px; }
-  #hud p { margin: 4px 0; }
-  #search { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 5px 8px;
-    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
-    color: #c9d1d9; font: inherit; }
-  #search:focus { outline: 1px solid #58a6ff; }
-  #searchResults { list-style: none; margin: 4px 0 0; padding: 0; max-height: 160px;
-    overflow-y: auto; border-radius: 6px; overflow-x: hidden; }
-  #searchResults li { padding: 4px 8px; font-size: 12.5px; cursor: pointer;
-    border-top: 1px solid #21262d; }
-  #searchResults li:first-child { border-top: none; }
-  #searchResults li:hover { background: #21262d; }
-  #legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
-  #legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
-    cursor: pointer; }
-  #legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  #card { position: absolute; top: 12px; right: 12px; width: 280px; max-height: 80vh;
-    overflow-y: auto; background: rgba(13,17,23,0.92); border: 1px solid #30363d;
-    border-radius: 8px; padding: 12px 14px; display: none; }
-  #card h3 { margin: 0 0 4px; font-size: 15px; }
-  #card .type { color: #8b949e; font-size: 12px; margin-bottom: 8px; }
-  #card ul { list-style: none; margin: 0; padding: 0; }
-  #card li { padding: 3px 0; border-top: 1px solid #21262d; font-size: 12.5px; cursor: pointer; }
-  #card li:first-child { border-top: none; }
-  #card li:hover { color: #58a6ff; }
-  a { color: #58a6ff; }
-</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<title>corpusatlas — Knowledge Graph Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="stage"></div>
-<div id="hud">
-  <p><strong>corpusatlas</strong> — reference viewer</p>
-  <p id="status">loading…</p>
-  <input id="search" type="search" placeholder="Find a node… (Esc to clear)" disabled>
-  <ul id="searchResults" hidden></ul>
-  <div id="legend"></div>
+
+<div class="kb-graph" data-kb-graph>
+  <!-- Top Navigation & Search Toolbar -->
+  <div class="kb-toolbar">
+    <div class="kb-nav" data-kb-nav aria-label="Exploration history">
+      <button type="button" data-kb-nav-back aria-label="Back (Alt+Left)" disabled>&larr;</button>
+      <button type="button" data-kb-nav-forward aria-label="Forward (Alt+Right)" disabled>&rarr;</button>
+      <div class="kb-breadcrumb" data-kb-breadcrumb aria-live="polite"></div>
+    </div>
+
+    <div class="kb-search">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input type="search" data-kb-search placeholder="Search entities" aria-label="Search entities (press /)" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="kb-suggest" autocomplete="off" spellcheck="false">
+      <kbd aria-hidden="true">/</kbd>
+      <ul class="kb-suggest" id="kb-suggest" data-kb-suggest role="listbox" hidden></ul>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+      <select id="datasetPicker" style="height:28px; font-size:0.75rem; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary); padding:0 6px; cursor:pointer;" aria-label="Dataset selector">
+        <option value="graph.json">Animals (1K)</option>
+        <option value="sample-graph.json">Knowledge Base (Tech)</option>
+      </select>
+
+      <select data-kb-layout-select style="height:28px; font-size:0.75rem; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary); padding:0 6px; cursor:pointer;" aria-label="Layout mode">
+        <option value="force">ForceAtlas2</option>
+        <option value="dag">Hierarchical (DAG)</option>
+        <option value="radar">Radar Matrix</option>
+      </select>
+
+      <button type="button" class="kb-expand-btn" data-kb-clusters-btn aria-label="Toggle Louvain community clusters" title="Topical Clusters">
+        <span>Clusters</span>
+      </button>
+
+      <button type="button" class="kb-expand-btn" data-kb-insights-btn aria-label="Open Centrality & Hub Insights" title="Hubs & Centrality Insights">
+        <span>Hubs</span>
+      </button>
+
+      <button type="button" class="kb-expand-btn" data-kb-export-png aria-label="Export high-resolution PNG snapshot" title="Export PNG">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span>Export</span>
+      </button>
+
+      <button type="button" class="kb-expand-btn" data-kb-copy-link aria-label="Copy shareable link to this view" title="Copy shareable link">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span>Share</span>
+      </button>
+
+      <button type="button" id="themeToggle" class="kb-expand-btn" aria-label="Toggle theme">
+        <span id="themeLabel">&#9788;</span>
+      </button>
+
+      <button type="button" class="kb-expand-btn" data-kb-expand aria-label="Expand the graph to fill the screen" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        <span>Expand</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="kb-diff-banner" data-kb-diff-banner hidden>
+    <div style="display:flex; align-items:center; gap:0.5rem;">
+      <strong>Diff View</strong>
+      <span class="kb-diff-badge added" data-kb-diff-added>+0 added</span>
+      <span class="kb-diff-badge removed" data-kb-diff-removed>-0 removed</span>
+      <span class="kb-diff-badge changed" data-kb-diff-changed>~0 changed</span>
+    </div>
+    <span style="font-size:0.7rem; color:var(--text-muted);">Comparing against base release</span>
+  </div>
+
+  <!-- Stage: WebGL Canvas & Floating Controls -->
+  <div class="kb-stage" data-kb-stage tabindex="0" aria-label="Knowledge graph. Search with slash, F to fit, Alt+arrows for history, arrow keys to move through a focused entity's connections.">
+    <div class="kb-canvas" data-kb-canvas></div>
+    <canvas class="kb-particles-canvas" data-kb-particles></canvas>
+
+
+    <!-- Left Settings Panel -->
+    <details class="kb-panel" data-kb-panel open>
+      <summary class="kb-panel-toggle">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        <span>Graph settings</span>
+      </summary>
+      <div class="kb-panel-body">
+        <details class="kb-sec" open>
+          <summary>Filters</summary>
+          <label class="kb-field-inline"><span>Presets</span>
+            <select data-kb-preset>
+              <option value="" selected>Choose a preset&hellip;</option>
+              <option value="everything">Everything</option>
+              <option value="no_comparisons">Hide scorecard comparisons</option>
+              <option value="structure">Structure &amp; data flow only</option>
+              <option value="concepts">Concepts &amp; patterns only</option>
+            </select>
+          </label>
+          <label class="kb-slider"><span>Focus depth<output data-kb-out="depth"></output></span><input type="range" min="1" max="3" step="1" data-kb-set="depth"></label>
+          <label class="kb-check"><input type="checkbox" data-kb-set="orphans"> Show orphans</label>
+          <label class="kb-check"><input type="checkbox" data-kb-set="comparisons"> Show scorecard comparisons</label>
+          <div class="kb-sec-sub"><span>Relations</span><span><button type="button" data-kb-rels-all>All</button> <button type="button" data-kb-rels-none>None</button></span></div>
+          <div class="kb-rels is-grouped" data-kb-rels></div>
+        </details>
+        <details class="kb-sec" open>
+          <summary>Groups</summary>
+          <div class="kb-groups" data-kb-groups></div>
+        </details>
+        <details class="kb-sec">
+          <summary>Display</summary>
+          <label class="kb-slider"><span>Text fade threshold<output data-kb-out="textFade"></output></span><input type="range" min="0" max="20" step="1" data-kb-set="textFade"></label>
+          <label class="kb-slider"><span>Node size<output data-kb-out="nodeSize"></output></span><input type="range" min="0.5" max="2.5" step="0.1" data-kb-set="nodeSize"></label>
+          <label class="kb-slider"><span>Link thickness<output data-kb-out="linkWidth"></output></span><input type="range" min="0.5" max="4" step="0.1" data-kb-set="linkWidth"></label>
+          <label class="kb-check" title="An arrow points from the source of the relation to its target."><input type="checkbox" data-kb-set="arrows"> Arrows</label>
+          <button type="button" class="kb-panel-btn" data-kb-animate>Animate</button>
+          <button type="button" class="kb-panel-btn" data-kb-undo-layout hidden>Undo layout</button>
+          <div class="kb-sec-sub" style="margin-top:0.6rem;"><span>Edge colour</span></div>
+          <div class="kb-edge-legend" data-kb-edge-legend></div>
+          <div class="kb-export-row">
+            <button type="button" class="kb-panel-btn" data-kb-export-png>Export PNG</button>
+            <button type="button" class="kb-panel-btn" data-kb-export-json>Export JSON</button>
+          </div>
+        </details>
+        <details class="kb-sec">
+          <summary>Forces</summary>
+          <label class="kb-slider"><span>Center force<output data-kb-out="center"></output></span><input type="range" min="0.1" max="5" step="0.1" data-kb-set="center"></label>
+          <label class="kb-slider"><span>Repel force<output data-kb-out="repel"></output></span><input type="range" min="1" max="60" step="1" data-kb-set="repel"></label>
+          <label class="kb-slider"><span>Link force<output data-kb-out="link"></output></span><input type="range" min="0.1" max="3" step="0.1" data-kb-set="link"></label>
+          <button type="button" class="kb-panel-btn" data-kb-forces-reset>Reset forces</button>
+        </details>
+      </div>
+    </details>
+
+    <!-- Interactive Onboarding Strip -->
+    <div class="kb-onboarding" data-kb-onboarding>
+      <p><strong>Click</strong> to focus &middot; <strong>Ctrl/Cmd-click</strong> a second entity for the path between them &middot; <strong>Shift-drag</strong> (or the lasso button) to select a cluster &middot; drag a node to move it</p>
+      <button type="button" data-kb-onboarding-dismiss aria-label="Dismiss">&times;</button>
+    </div>
+
+    <!-- Hover Card Tooltip -->
+    <div class="kb-card" data-kb-card hidden></div>
+
+    <!-- Pinned Inspector Card (Right) -->
+    <div class="kb-pin" data-kb-pin hidden tabindex="-1" aria-live="polite"></div>
+
+    <!-- Loading Overlay -->
+    <div class="kb-loading" data-kb-loading><span>Laying out&hellip;</span></div>
+
+    <!-- 2D Minimap Canvas -->
+    <canvas class="kb-minimap" data-kb-minimap aria-label="Minimap — click or drag to jump elsewhere in the graph" role="button"></canvas>
+
+    <!-- Zoom & Selection Controls -->
+    <div class="kb-zoom" data-kb-zoom role="group" aria-label="Zoom controls">
+      <button type="button" data-kb-lasso-toggle aria-label="Lasso-select tool, for touch — drag on the canvas to select a cluster" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3a9 5 0 0 0 0 10c2 2 1 4-1 5"/><circle cx="17" cy="15" r="3"/></svg>
+      </button>
+      <button type="button" data-kb-zoom-action="in" aria-label="Zoom in">+</button>
+      <button type="button" data-kb-zoom-action="out" aria-label="Zoom out">&minus;</button>
+      <button type="button" data-kb-zoom-action="reset" aria-label="Fit the whole graph (F)">&#10021;</button>
+    </div>
+  </div>
+
+  <!-- Bottom Details & Evidence Drawer -->
+  <details class="kb-bottom-panel" data-kb-bottom-panel>
+    <summary class="kb-bottom-panel-toggle">
+      <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      <span data-kb-bottom-summary>Details</span>
+    </summary>
+    <div class="kb-bottom-panel-body" data-kb-bottom-body>
+      <div class="kb-centre" data-kb-centre aria-live="polite"></div>
+      <p class="kb-meta" data-kb-meta></p>
+    </div>
+  </details>
+
+    <!-- Timeline Scrubber Bar -->
+  <div class="kb-timeline" data-kb-timeline hidden>
+    <button type="button" class="kb-timeline-btn" data-kb-timeline-play aria-label="Play timeline">&#9654;</button>
+    <span class="kb-timeline-date" data-kb-timeline-date>All time</span>
+    <input type="range" class="kb-timeline-slider" data-kb-timeline-slider min="0" max="100" value="100">
+    <span class="kb-timeline-total" data-kb-timeline-total>100%</span>
+  </div>
+
+  <p class="kb-status" data-kb-status>Loading the graph&hellip;</p>
 </div>
-<div id="card"></div>
 
-<!-- graphology and Sigma ship no ES-module browser build, so they load as
-     classic UMD globals here; ForceAtlas2 ships no browser build at all and
-     comes in as jsDelivr's +esm transform below, in the type="module" script
-     that uses it. Same pairing shirokoff.ca's own renderer uses — proven
-     versions, not arbitrary latest. -->
-<script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sigma@3.0.1/dist/sigma.min.js"></script>
-<script type="module">
-// A starting point, not a renderer to build on as-is: one static layout, no
-// live simulation, no drag, no path-finding, no URL routing. The production
-// renderer this was pulled from (shirokoff.ca/knowledge-base) is ~1900 lines
-// for exactly those features — deliberately not reproduced here, because
-// they were tuned for one specific graph's shape, not written to be generic.
-// Label search and click-to-focus (dim everything but the selected node's
-// neighbourhood, pan the camera there) are the one interaction this file
-// does carry, since "find a node in a 1,000-node hairball" is a need every
-// graph this renders will have, not something specific to one shape.
-// Copy this file and grow it; it isn't meant to stay this small forever.
-//
-// Assumes graph.json sits next to this file — override with ?graph=<url>.
-import forceAtlas2 from 'https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/+esm';
+<div class="kb-modal-backdrop" data-kb-insights-modal hidden>
+  <div class="kb-modal-panel">
+    <div class="kb-modal-header">
+      <h3 class="kb-modal-title">Graph Centrality & Hub Insights</h3>
+      <button type="button" class="kb-modal-close" data-kb-insights-close aria-label="Close">&times;</button>
+    </div>
+    <div class="kb-modal-body">
+      <div class="kb-insight-col">
+        <h4 class="kb-insight-col-title">Top Degree Hubs</h4>
+        <div data-kb-hubs-degree></div>
+      </div>
+      <div class="kb-insight-col">
+        <h4 class="kb-insight-col-title">Top PageRank Authorities</h4>
+        <div data-kb-hubs-pagerank></div>
+      </div>
+      <div class="kb-insight-col">
+        <h4 class="kb-insight-col-title">Top Betweenness Bridges</h4>
+        <div data-kb-hubs-betweenness></div>
+      </div>
+    </div>
+  </div>
+</div>
 
-const Graph = window.graphology.Graph || window.graphology;
-const Sigma = window.Sigma.Sigma || window.Sigma;
+<div class="kb-toast" data-kb-toast>Link copied to clipboard</div>
 
-const statusEl = document.getElementById('status');
-const legendEl = document.getElementById('legend');
-const cardEl = document.getElementById('card');
-const searchEl = document.getElementById('search');
-const resultsEl = document.getElementById('searchResults');
-
-const params = new URLSearchParams(location.search);
-const graphUrl = params.get('graph') || './graph.json';
-
-// Deterministic colour per type from its name alone, so this works for any
-// corpusatlas ontology without hard-coding type names — the moment
-// ontology.py stops being fixed across every consumer (see the README),
-// this still won't need an edit. Sigma's WebGL node program parses #rrggbb
-// only, not arbitrary CSS colour syntax, so this returns hex, not hsl().
-function colorFor(type) {
-  let hash = 0;
-  for (let i = 0; i < type.length; i++) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
-  const h = hash % 360, s = 0.65, l = 0.6;
-  const k = (n) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  const toHex = (n) => Math.round(f(n) * 255).toString(16).padStart(2, '0');
-  return `#${toHex(0)}${toHex(8)}${toHex(4)}`;
-}
-
-let data;
-try {
-  data = await fetch(graphUrl).then((r) => {
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return r.json();
-  });
-} catch (err) {
-  statusEl.textContent = `Could not load ${graphUrl}: ${err.message}`;
-  throw err;
-}
-
-const entityTypes = new Set(data.entity_types || []);
-// Entities only, same choice the production renderer makes: context nodes
-// (articles, assessments — whatever a consumer's adapters produced) are
-// evidence, not graph structure, and drawing both makes most graphs a
-// hairball well before 1,000 nodes. Drop this filter to see everything.
-const nodes = data.nodes.filter((n) => entityTypes.has(n.type));
-const nodeIds = new Set(nodes.map((n) => n.id));
-const edges = data.edges.filter((e) => nodeIds.has(e.src) && nodeIds.has(e.dst));
-
-const g = new Graph({ multi: true });
-const maxDegree = Math.max(1, ...nodes.map((n) => n.degree || 0));
-for (const n of nodes) {
-  g.addNode(n.id, {
-    label: n.label,
-    kind: n.type, // "type" is reserved by Sigma for choosing a node's render program
-    size: 3 + 5 * Math.sqrt((n.degree || 0) / maxDegree),
-    color: colorFor(n.type),
-    x: Math.random(), y: Math.random(),
-    meta: n,
-  });
-}
-let dupes = 0;
-for (const e of edges) {
-  try {
-    g.addEdge(e.src, e.dst, { rel: e.rel, size: 1, color: 'rgba(139,148,158,0.35)' });
-  } catch (err) { dupes++; } // a second edge between the same pair — fine, just skip it
-}
-
-// Barnes-Hut trades a little layout precision for O(n log n) force
-// calculation instead of O(n²) — negligible for a knowledge graph's visual
-// layout, and the threshold used to be 2000, which meant a graph just
-// under it paid full brute-force cost while a graph well over it didn't:
-// measured, a 2,000-node graph (brute force) took ~8.5s and a 5,000-node
-// one (Barnes-Hut) took ~12.2s — worse per node despite being 2.5x larger.
-// 200 keeps brute force only for genuinely small graphs, where it finishes
-// fast either way and the exactness doesn't matter.
-forceAtlas2.assign(g, {
-  iterations: 300,
-  settings: { gravity: 1, scalingRatio: 8, strongGravityMode: true, barnesHutOptimize: g.order > 200 },
-});
-
-const renderer = new Sigma(g, document.getElementById('stage'), {
-  labelRenderedSizeThreshold: 8,
-  defaultDrawNodeHover: true,
-});
-
-// The one piece of interaction state this file has: which node (if any) is
-// focused. The two reducers below are how Sigma dims everything outside its
-// neighbourhood without touching the graph's own stored node/edge data.
-let focusedNode = null;
-
-renderer.setSetting('nodeReducer', (node, attrs) => {
-  if (!focusedNode || node === focusedNode || g.areNeighbors(node, focusedNode)) return attrs;
-  return { ...attrs, label: '', color: '#21262d', zIndex: 0 };
-});
-renderer.setSetting('edgeReducer', (edge, attrs) => {
-  if (!focusedNode) return attrs;
-  const [s, t] = g.extremities(edge);
-  if (s === focusedNode || t === focusedNode) return attrs;
-  return { ...attrs, color: 'rgba(48,54,61,0.12)' };
-});
-
-function focusNode(id) {
-  focusedNode = id;
-  renderer.refresh();
-
-  const n = g.getNodeAttribute(id, 'meta');
-  const neighbours = g.neighbors(id)
-    .map((nid) => ({ id: nid, label: g.getNodeAttribute(nid, 'label') }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  cardEl.style.display = 'block';
-  cardEl.innerHTML = `
-    <h3>${n.label}</h3>
-    <div class="type">${n.type} · degree ${n.degree || 0}</div>
-    ${n.url ? `<p><a href="${n.url}" target="_blank" rel="noopener">source →</a></p>` : ''}
-    <ul>${neighbours.slice(0, 25).map((nb) => `<li data-node="${nb.id}">${nb.label}</li>`).join('')}</ul>
-    ${neighbours.length > 25 ? `<p>+${neighbours.length - 25} more</p>` : ''}
-  `;
-  // A neighbour in the card is itself a node in the graph — clicking it
-  // refocuses there instead of making the reader find it by eye.
-  for (const li of cardEl.querySelectorAll('li[data-node]')) {
-    li.addEventListener('click', () => focusNode(li.dataset.node));
-  }
-
-  const pos = renderer.getNodeDisplayData(id);
-  if (pos) renderer.getCamera().animate({ x: pos.x, y: pos.y }, { duration: 300 });
-}
-
-function clearFocus() {
-  focusedNode = null;
-  renderer.refresh();
-  cardEl.style.display = 'none';
-  searchEl.value = '';
-  resultsEl.hidden = true;
-  resultsEl.innerHTML = '';
-}
-
-renderer.on('clickNode', ({ node }) => focusNode(node));
-renderer.on('clickStage', clearFocus);
-
-searchEl.disabled = false;
-searchEl.addEventListener('input', () => {
-  const q = searchEl.value.trim().toLowerCase();
-  resultsEl.innerHTML = '';
-  if (!q) { resultsEl.hidden = true; return; }
-  const matches = nodes.filter((n) => n.label.toLowerCase().includes(q)).slice(0, 8);
-  resultsEl.hidden = matches.length === 0;
-  for (const m of matches) {
-    const li = document.createElement('li');
-    li.textContent = `${m.label} (${m.type})`;
-    li.addEventListener('click', () => {
-      focusNode(m.id);
-      searchEl.value = m.label;
-      resultsEl.hidden = true;
+<script>
+  // Setup theme toggle and dataset picker
+  const picker = document.getElementById('datasetPicker');
+  const params = new URLSearchParams(window.location.search);
+  const currentData = params.get('data') || 'graph.json';
+  if (picker) {
+    picker.value = currentData;
+    picker.addEventListener('change', (e) => {
+      const hash = window.location.hash;
+      window.location.search = '?data=' + encodeURIComponent(e.target.value) + hash;
     });
-    resultsEl.appendChild(li);
   }
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') clearFocus();
-});
 
-for (const type of [...entityTypes].sort()) {
-  const span = document.createElement('span');
-  span.innerHTML = `<i style="background:${colorFor(type)}"></i>${type}`;
-  legendEl.appendChild(span);
-}
-
-statusEl.textContent = `${nodes.length} entities · ${edges.length - dupes} relationships` +
-  (data.generated ? ` · built ${data.generated}` : '') + ' · click a node, or search above';
+  const themeBtn = document.getElementById('themeToggle');
+  const themeLabel = document.getElementById('themeLabel');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      if (themeLabel) themeLabel.innerHTML = next === 'light' ? '&#9790;' : '&#9788;';
+    });
+  }
 </script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

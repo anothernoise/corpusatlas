@@ -1,0 +1,7 @@
+# Donkey
+
+Wikipedia article for Donkey.
+
+The donkey or ass is a domesticated equine. It derives from the African wild ass, Equus africanus, and may be classified either as a subspecies thereof, Equus africanus asinus, or as a separate species, Equus asinus. It was domesticated in Africa some 5000–7000 years ago, and has been used mainly as a working animal since that time. 
+There are more than 40 million donkeys in the world, mostly in underdeveloped countries, where they are used principally as draught or pack animals. While working donkeys are often associated with those living at or below subsistence, small numbers of donkeys or asses are kept for breeding, as pets, and for livestock protection in developed countries.
+An adult male donkey is a jack or jackass, an adult female is a jenny, jenny ass, or jennet, and an immature donkey of either sex is a foal. Jacks are often mated with female horses (mares) to produce mules; the less common hybrid of a male horse (stallion) and jenny is a hinny.

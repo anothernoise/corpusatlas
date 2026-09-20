@@ -1,0 +1,5 @@
+# Quetzal
+
+Wikipedia article for Quetzal.
+
+Quetzals () are strikingly colored birds in the trogon family. They are found in forests, especially in humid highlands, with the five species from the genus Pharomachrus being exclusively Neotropical, while a single species, the eared quetzal, Euptilotis neoxenus, is found in Guatemala, sometimes in Mexico and very locally in the southernmost United States. In the highlands of the states of Sonora, Chihuahua, Sinaloa, Durango, Nayarit, Zacatecas, Jalisco, and Michoacán, the eared quetzal can be found from northwest to west-central Mexico. It is a Mesoamerican indigenous species, but some reports show that it occasionally travels and nests in southeastern Arizona and New Mexico in the United States. June to October is the mating season for eared quetzals. Quetzals are fairly large (all over 32 cm (13 in) long), slightly bigger than other trogon species. The resplendent quetzal is the national bird of Guatemala because of its vibrant colour and cultural significance to the Maya.

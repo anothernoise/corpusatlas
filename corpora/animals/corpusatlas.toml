@@ -1,0 +1,34 @@
+# Configuration for 1000 Animal Wikipedia pages
+[[sources]]
+type     = "obsidian"
+path     = "notes"
+url_base = "https://en.wikipedia.org/wiki/"
+
+[[sources]]
+type = "radar_entries"
+path = "radar.json"
+
+[[sources]]
+type = "radar_scorecards"
+path = "scorecards.json"
+
+[[sources]]
+type     = "entity_packs"
+path     = "packs"
+url_base = "https://en.wikipedia.org/wiki/"
+
+[ontology]
+entities = "entities.toml"
+schema   = "ontology.toml"
+
+[ontology.entity_colors]
+Mammal       = "#f59e0b"
+Bird         = "#06b6d4"
+Reptile      = "#10b981"
+Amphibian    = "#84cc16"
+Fish         = "#3b82f6"
+Invertebrate = "#8b5cf6"
+Habitat      = "#14b8a6"
+Diet         = "#ec4899"
+Taxon        = "#a855f7"
+Animal       = "#f97316"

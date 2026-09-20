@@ -1,0 +1,7 @@
+# Acrobatidae
+
+Wikipedia article for Acrobatidae.
+
+The Acrobatidae are a small family of gliding marsupials containing two genera, each with a single species, the feathertail glider (Acrobates pygmaeus) from Australia and feather-tailed possum (Distoechurus pennatus) from New Guinea.
+This family of the order Diprotodontia, which can be found in the east coast and inland of Australia and in some islands of New Guinea, is characterized by their very small size, which has side effects: because their mass-to-surface-area ratio is so small, heat escapes quicker from their bodies than it would in larger animals (the larger the mass-to-surface-area ratio, the harder it is to get rid of heat). Therefore, when temperature drops or food is scarce, they have trouble maintaining their body temperature and they enter a state known as torpidity (not to be confused with hibernation, which is not known in marsupials) which can last between one day and two weeks. In this state, the animal's breathing slows down, its temperature drops to almost that of its surroundings, and the animal becomes unresponsive.
+The earliest fossils of this family are teeth from the Riversleigh World Heritage Area, assigned to both extant genera (Acrobates and Distoechurus). These fossils suggest that both genera have rather early origins, that Acrobates originally inhabited closed forest environments before transitioning to open forests, and that Distocheurus originally inhabited Australia before dispersing to New Guinea and eventually going extinct in Australia.

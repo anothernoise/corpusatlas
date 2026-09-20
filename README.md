@@ -47,7 +47,7 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.8.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.9.0
 
 corpusatlas init --dir my-corpus    # a starter config + entity registry
 # edit my-corpus/corpusatlas.toml to point `path` at your notes, then:
@@ -258,6 +258,58 @@ precomputing layout coordinates at build time instead of laying out in the
 browser on every load; not done here since nothing this module's own
 consumer has needs it yet.
 
+## Graph RAG, Analytics & Advanced Tooling
+
+Beyond building static graphs, CorpusAtlas provides a comprehensive zero-dependency backend toolkit:
+
+### 1. Graph RAG Subgraph Extraction (Personalized PageRank)
+Extract an entity's semantic ego-network formatted for LLM prompts using random walks with restart (PPR):
+```bash
+corpusatlas context --graph graph.json --entity "Apache Spark" --algorithm ppr --top-k 20 --format markdown
+```
+Supports `--algorithm ppr|bfs`, `--top-k <N>`, `--depth 1|2`, and `--format markdown|json`.
+
+### 2. Knowledge Graph Auditing & Quality Metrics
+Run topological graph health checks to identify cycle anomalies, bridge bottlenecks, hub concentration, and contradictory relations:
+```bash
+corpusatlas audit --graph graph.json
+```
+Computes:
+- **Degree Gini Coefficient**: Measure network centralization and power-law distribution.
+- **Bridge Edge Detection**: Single points of topological failure using Tarjan's bridge algorithm.
+- **Hierarchical Cycle Detection**: Detects invalid circular taxonomic/hierarchical relations.
+- **Contradiction Detection**: Flags conflicting reciprocal relationships between identical entities.
+
+### 3. Declarative Schema Migration
+Refactor entity types and relationship names on an existing `graph.json` without re-running long corpus builds:
+```bash
+corpusatlas migrate --graph graph.json --migration migration.toml --out migrated.json
+```
+
+### 4. Spatial Quadtree LOD Tiling
+For massive graphs, partition 2D layout coordinates into a multi-resolution quadtree pyramid for client-side streaming:
+```bash
+corpusatlas tile --graph graph.json --out-dir tiles/ --max-zoom 3
+```
+Emits `tiles/{z}/{x}_{y}.json` and `manifest.json`.
+
+### 5. Multi-Format Export (DuckDB, Parquet, Cypher, RDF Turtle)
+
+Export `graph.json` for analytical SQL engines, columnar storage, and graph databases:
+
+```bash
+# Export to DuckDB database, Apache Parquet, CSV, and SQL import script:
+corpusatlas export --graph graph.json --format duckdb --out-dir duckdb_export/
+
+# Export to Cypher statements for Neo4j / AWS Neptune:
+corpusatlas export --graph graph.json --format cypher --out graph.cql
+
+# Export to W3C RDF Turtle for SPARQL triple-stores:
+corpusatlas export --graph graph.json --format turtle --out graph.ttl
+```
+
+When DuckDB CLI is installed on the host system, `export --format duckdb` automatically invokes DuckDB to build native `.duckdb` and `.parquet` files directly without requiring any third-party Python pip dependencies!
+
 ## Other formats
 
 `graph.json` stays the artifact `build` writes — it's what the browser reads
@@ -298,6 +350,13 @@ carrying the metadata — chosen over RDF-star or singleton properties for
 being the more broadly compatible option. See `corpusatlas/rdf_export.py`
 for the full reasoning. Worth doing because something now needs to `SPARQL`
 this graph; wasn't worth doing speculatively before that was true.
+
+## Performance & Architecture
+
+- **Barnes-Hut $O(N \log N)$ Quadtree Layout**: Precalculates 2D force-directed node coordinates using adaptive quadtree spatial decomposition (`--layout`), scaling to tens of thousands of nodes in seconds.
+- **Aho-Corasick Linear-Time Mention Scanner**: Deterministic string automaton matching across vocabulary keywords with word-boundary checks in $O(L + M)$ time.
+- **SQLite Out-of-Core Pipeline Store**: Provides memory-bounded relational ingestion, deduplication, document retraction, and JSON streaming via `SQLitePipelineStore`.
+- **Merkle-DAG Incremental Cache**: Content-addressable SHA-256 tree over extractor tier claims, invalidating only touched documents on rebuilds.
 
 ## Used by
 

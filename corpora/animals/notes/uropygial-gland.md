@@ -1,0 +1,5 @@
+# Uropygial gland
+
+Wikipedia article for Uropygial gland.
+
+The uropygial gland, informally known as the preen gland or the oil gland, is a bilobed sebaceous gland possessed by the majority of birds used to distribute the gland's oil through the plumage by means of preening.  It is located dorsally at the base of the tail (between the fourth caudal vertebra and the pygostyle) and is greatly variable in both shape and size.  In some species, the opening of the gland has a small tuft of feathers to provide a wick for the preen oil (see below).  It is a holocrine gland enclosed in a connective tissue capsule made up of glandular acini that deposit their oil secretion into a common collector tube ending in a variable number of pores (openings), most typically two. Each lobe has a central cavity that collects the secretion from tubules arranged radially around the cavity. The gland secretion is conveyed to the surface via ducts that, in most species, open at the top of a papilla (nipple-like structure).

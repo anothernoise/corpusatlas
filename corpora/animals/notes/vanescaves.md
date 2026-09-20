@@ -1,0 +1,6 @@
+# Vanescaves
+
+Wikipedia article for Vanescaves.
+
+Vanescaves is a probable clade of strisorean birds that include the clades Steatornithiformes (the oilbird), Nyctibiiformes (the potoos), Podargiformes (frogmouths), and Apodimorphae (owlet-nightjars, swifts, and hummingbirds). Some molecular studies do support the grouping of these birds, others offer conflicting positions of the non-apodimorphaean strisoreans. In 2019 the authors Chen et al. performed a combined analysis using 2289 ultra-conserved elements [UCEs], 117 morphological characters from extant and fossil taxa found support in this clade. The authors then proposed to name this group, which its meaning is Latin for "vanish birds" in reference to the disparate nature of their geographic distribution, as well as to the poem "A Route of Evanescence" by the American poet Emily Dickinson which features a hummingbird as the main subject. In 2020 Chen & Field named the two major subclades of this group, with Sedentaves (oilbirds and potoos) and Letornithes (frogmouths, owlet-nightjars, swifts, and hummingbirds) for their crown-groups.
+Below is the overall phylogeny of Vanescaves as well as their sister group Caprimulgidae after Prum et al. (2015), White & Braun (2019), Chen et al. (2019), and Stiller et al. (2024), with phylocode names following Chen & Field (2020).

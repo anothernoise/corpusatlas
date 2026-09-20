@@ -14,3 +14,6 @@ htmlcov/
 # Build output — the graph is generated, never committed inside this package.
 # (In the site repo the artifact lives at knowledge-base/graph.json.)
 graph.json
+*.cache.json
+.cache.json
+.corpusatlas_cache.json

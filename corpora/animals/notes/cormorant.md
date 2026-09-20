@@ -1,0 +1,8 @@
+# Cormorant
+
+Wikipedia article for Cormorant.
+
+Phalacrocoracidae is a family of approximately 40 species of aquatic birds found worldwide and commonly known as cormorants and shags. Several different classifications of the family have been proposed, but in 2021 the International Ornithologists' Union (IOU) adopted a consensus taxonomy of seven genera. The common names "cormorant" and "shag" have been assigned to different species in the family somewhat haphazardly.
+Cormorants and shags are medium-to-large birds, with body weight in the range of 0.35–5 kilograms (0.77–11.02 lb) and wing span of 60–100 centimetres (24–39 in). The majority of species have dark feathers. The bill is long, thin and hooked. Their feet have webbing between all four toes. All species are fish-eaters, catching the prey by diving from the surface. They are excellent divers, and under water they propel themselves with their feet with help from their wings; some cormorant species have been found to dive as deep as 45 metres (150 ft). Cormorants and shags have relatively short wings due to their need for economical movement underwater, and consequently have among the highest flight costs of any flying bird.
+Cormorant colonies nest around seacoasts, in trees, islets or cliffs. They are coastal rather than oceanic birds. Some species have colonised inland waters. Species may be found in all areas of the world except for the central Pacific islands.
+Cormorants may descend from a freshwater ancestor in south Asia whose offspring adapted in time to new environments and spread across the Eurasian landmass and the world.

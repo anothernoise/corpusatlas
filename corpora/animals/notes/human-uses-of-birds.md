@@ -1,0 +1,9 @@
+# Human uses of birds
+
+Wikipedia article for Human uses of birds.
+
+Human uses of birds have, for thousands of years, included both economic uses such as food, and symbolic uses such as art, music, and religion.
+In terms of economic uses, birds have been hunted for food since Palaeolithic times. They have been captured and bred as poultry to provide meat and eggs since at least the time of ancient Egypt. Some species have been used, too, to help locate or to catch food, as with cormorant fishing and the use of honeyguides. Feathers have long been used for bedding, as well as for quill pens and for fletching arrows. Today, many species face habitat loss and other threats caused by humans; bird conservation groups work to protect birds and to influence governments to do so.
+Birds have appeared in the mythologies and religions of many cultures since ancient Sumer. For example, the dove was the symbol of the ancient Mesopotamian goddess Inanna, the Canaanite mother goddess Asherah, and the Greek goddess Aphrodite. Athena, the Greek goddess of wisdom, had a little owl as her symbol, and, in ancient India, the peacock represented Mother Earth. Birds have often been seen as symbols, whether bringing bad luck and death, being sacred, or being used in heraldry. 
+In terms of entertainment, raptors have been used in falconry, while cagebirds have been kept for their song. Other birds have been raised for the traditional sports of cockfighting and pigeon racing. Birdwatching, too, has grown to become a major leisure activity.
+Birds feature in a wide variety of art forms, including in painting, sculpture, poetry and prose, film and fashion. Birds also appear in music as well as traditional dance and ballet. In certain cases, such as the bird-and-flower painting of China, birds are central to an artistic genre.

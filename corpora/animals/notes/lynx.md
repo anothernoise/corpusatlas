@@ -1,0 +1,9 @@
+# Lynx
+
+Wikipedia article for Lynx.
+
+A lynx ( links; pl.: lynx or lynxes) is any of the four extant species (the Canada lynx, Iberian lynx, Eurasian lynx and the bobcat) within the medium-sized wild cat genus Lynx. The name originated in Middle English via Latin from the Greek word lynx (λύγξ), derived from the Indo-European root *leuk- ('light', 'brightness'), in reference to the luminescence of its reflective eyes.
+
+## Related Animals
+
+[[Animal]] [[Badger]] [[Bear]] [[Binturong]] [[Bird]] [[Bobcat]] [[Caniformia]] [[Carnivora]] [[Cat]] [[Cheetah]] [[Deer]] [[Dog]] [[Felidae]] [[Felis]] [[Ferret]]

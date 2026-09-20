@@ -7,7 +7,7 @@ empty directory.
 ## 1. Install
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.8.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.9.0
 ```
 
 No third-party dependencies, so this is the whole install.
@@ -87,6 +87,47 @@ Or point the same viewer at any `graph.json` this module has ever built,
 including [shirokoff.ca's own](https://shirokoff.ca/knowledge-base/graph.json):
 `viewer.html?graph=https://shirokoff.ca/knowledge-base/graph.json`.
 
+## 6. Advanced Discovery, Graph RAG, Analytics & Export
+
+- **Graph RAG Context Extraction (Personalized PageRank)**: Extract a focused semantic subgraph using random walks with restart for LLM prompt augmentation:
+  ```bash
+  corpusatlas context --graph graph.json --entity spark --algorithm ppr --top-k 20 --format markdown
+  ```
+- **Knowledge Graph Quality & Topological Audit**: Inspect graph health, Gini network concentration, bridge bottlenecks, cycle anomalies, and contradictory claims:
+  ```bash
+  corpusatlas audit --graph graph.json
+  ```
+- **Multi-Format Export (DuckDB, Parquet, Cypher, RDF Turtle)**: Export graph data for SQL analytics, columnar storage, or graph databases:
+  ```bash
+  corpusatlas export --graph graph.json --format duckdb --out-dir duckdb_export/
+  corpusatlas export --graph graph.json --format cypher --out graph.cql
+  corpusatlas export --graph graph.json --format turtle --out graph.ttl
+  ```
+- **Spatial Quadtree LOD Tiling**: Partition 2D layout into multi-resolution tiles (`tiles/{z}/{x}_{y}.json`) for streaming large graphs without loading them all at once:
+  ```bash
+  corpusatlas tile --graph graph.json --out-dir tiles/ --max-zoom 3
+  ```
+- **Declarative Schema Refactoring & Migration**: Evolve node and edge types without re-running full builds:
+  ```bash
+  corpusatlas migrate --graph graph.json --migration migration.toml --out migrated.json
+  ```
+- **Pre-computed 2D Layout (Barnes-Hut Quadtree)**: Calculate $O(N \log N)$ force-directed node coordinates during build for instantaneous first-frame browser rendering:
+  ```bash
+  corpusatlas build --config corpusatlas.toml --out graph.json --layout
+  ```
+- **Zero-Config Static Publishing**: Bundle viewer HTML, CSS, JS and `graph.json` into a deployable distribution directory:
+  ```bash
+  corpusatlas publish --graph graph.json --out-dir dist/
+  ```
+- **Co-Occurrence Edge Inference**: Automatically infer latent relationships between entities sharing document citations:
+  ```bash
+  corpusatlas infer --graph graph.json --threshold 0.4 --out inferred.json
+  ```
+- **Live File Watcher**: Auto-rebuild on any document or configuration edit:
+  ```bash
+  corpusatlas watch --config corpusatlas.toml --out graph.json
+  ```
+
 ## Where to go from here
 
 - **A real corpus.** Point `corpusatlas.toml` at an actual vault, or add an
@@ -103,7 +144,11 @@ including [shirokoff.ca's own](https://shirokoff.ca/knowledge-base/graph.json):
 - **A faster rebuild loop on a large corpus.** Add `--cache
   .corpusatlas_cache.json` to the build command once re-parsing an unchanged
   corpus starts taking long enough to notice.
+- **Try a 1,000-page real-world benchmark.** Fetch and compile 1,000 Wikipedia
+  animal articles with `python3 scripts/fetch_wikipedia_animals.py` and benchmark
+  cold/warm performance with `python3 scripts/benchmark_animals.py`.
 - **The full design reasoning** — why entity resolution is the real work,
   what's fixed on purpose versus configurable, the three extraction tiers —
   is in [docs/DESIGN.md](DESIGN.md) and the main
   [README](../README.md).
+
