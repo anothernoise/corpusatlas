@@ -782,6 +782,80 @@ def cmd_query(args) -> int:
     return 0
 
 
+def cmd_sparql(args) -> int:
+    """Executes in-memory SPARQL 1.1 pattern queries over graph."""
+    from .sparql import execute_sparql
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    res = execute_sparql(g, args.query)
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+    else:
+        if not res:
+            print("No matching solutions found.")
+            return 0
+        vars_list = list(res[0].keys())
+        print(" | ".join(vars_list))
+        print("-" * (len(vars_list) * 20))
+        for row in res:
+            print(" | ".join(str(row.get(v, "")) for v in vars_list))
+    return 0
+
+
+def cmd_analyze(args) -> int:
+    """Computes topological metrics, single points of failure, and health score."""
+    from .analyze import analyze_graph_topology
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    metrics = analyze_graph_topology(g)
+    if getattr(args, "json", False):
+        print(json.dumps(metrics, indent=2))
+    else:
+        print("CorpusAtlas Graph Topology & Health Report")
+        print("=" * 45)
+        print(f"Nodes: {metrics['num_nodes']}, Edges: {metrics['num_edges']}")
+        print(f"Orphan Nodes: {metrics['num_orphans']}")
+        print(f"Density: {metrics['density']}, Avg Degree: {metrics['average_degree']}")
+        print(f"Connected Components: {metrics['connected_components_count']}")
+        print(f"Articulation Points (SPOF): {len(metrics['articulation_points'])}")
+        if metrics['articulation_points']:
+            print("  " + ", ".join(metrics['articulation_points'][:10]))
+        print(f"Overall Health Score: {metrics['health_score']}/100")
+    return 0
+
+
+def cmd_lint(args) -> int:
+    """Lints architecture and relational graph against declarative rules."""
+    from .lint import lint_graph
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    rules = {}
+    if getattr(args, "rules", None):
+        rpath = Path(args.rules)
+        if rpath.suffix == ".json":
+            rules = json.loads(rpath.read_text(encoding="utf-8"))
+        else:
+            rules = tomllib.loads(rpath.read_text(encoding="utf-8"))
+    else:
+        # Default lint rules: warn on god nodes > 50 degree
+        rules = {"max_degree": 50}
+
+    violations = lint_graph(g, rules)
+    errors = [v for v in violations if v.get("severity") == "error"]
+    warnings = [v for v in violations if v.get("severity") == "warning"]
+
+    if getattr(args, "json", False):
+        print(json.dumps(violations, indent=2))
+    else:
+        for v in violations:
+            lvl = v.get("severity", "error").upper()
+            msg = v.get("message", "")
+            print(f"[{lvl}] {msg}")
+        print(f"\nLint complete: {len(errors)} errors, {len(warnings)} warnings.")
+
+    return 1 if errors else 0
+
+
 def cmd_benchmark(args) -> int:
     """Runs micro-benchmarks across core graph algorithms and reports performance telemetry."""
     from .benchmark import run_all_benchmarks
@@ -1046,6 +1120,23 @@ def main(argv: list[str] | None = None) -> int:
     query_parser.add_argument("--ask", required=True, help="natural language question")
     query_parser.add_argument("--json", action="store_true", help="output structured JSON response")
     query_parser.set_defaults(fn=cmd_query)
+
+    sparql_parser = sub.add_parser("sparql", help="query graph with W3C SPARQL pattern matching")
+    sparql_parser.add_argument("--graph", required=True, help="path to graph.json")
+    sparql_parser.add_argument("--query", required=True, help="SPARQL SELECT query string")
+    sparql_parser.add_argument("--json", action="store_true", help="output results as JSON")
+    sparql_parser.set_defaults(fn=cmd_sparql)
+
+    analyze_parser = sub.add_parser("analyze", help="compute graph topology, articulation points, and health metrics")
+    analyze_parser.add_argument("--graph", required=True, help="path to graph.json")
+    analyze_parser.add_argument("--json", action="store_true", help="output metrics as JSON")
+    analyze_parser.set_defaults(fn=cmd_analyze)
+
+    lint_parser = sub.add_parser("lint", help="lint graph architecture against declarative rules (exits 1 on error)")
+    lint_parser.add_argument("--graph", required=True, help="path to graph.json")
+    lint_parser.add_argument("--rules", help="path to rules.toml or rules.json configuration")
+    lint_parser.add_argument("--json", action="store_true", help="output violations as JSON")
+    lint_parser.set_defaults(fn=cmd_lint)
 
     bm = sub.add_parser("benchmark", help="run performance micro-benchmarks and report telemetry")
     bm.add_argument("--quick", action="store_true", help="run faster benchmark with smaller graph")
