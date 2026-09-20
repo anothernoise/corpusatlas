@@ -71,7 +71,7 @@ class AhoCorasick:
             self.build()
 
         search_text = text if self.case_sensitive else text.lower()
-        curr: Optional[_AhoNode] = self.root
+        curr: _AhoNode | None = self.root
         n = len(search_text)
 
         for i, ch in enumerate(search_text):
