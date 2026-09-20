@@ -82,7 +82,7 @@ import {
 import { createParticleController } from './js/particles.js';
 import { createMinimapController } from './js/minimap.js';
 
-const urlParams = new URLSearchParams(window.location.search);
+const urlParams = typeof window !== 'undefined' && window.location ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const GRAPH_URL = urlParams.get('data') || 'graph.json';
 const CDN = {
   graphology: 'https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js',
@@ -666,7 +666,7 @@ export async function initKbGraph(root) {
     currentLayout = targetMode;
     switchLayoutAnimation(g, renderer, targetMode, layoutPositions, () => {
       try { renderer.setCustomBBox(renderer.getBBox()); } catch (e) {}
-      fit();
+      fitAll();
     });
   }
 
@@ -1113,6 +1113,19 @@ export async function initKbGraph(root) {
   const drawMinimap = () => minimapController.draw();
 
   // ---- Cards --------------------------------------------------------------
+  // A node's visible relationships, each read from this node's end: Spark
+  // "implements" lazy evaluation; lazy evaluation is "implemented by" Spark.
+  function neighbours(node) {
+    const out = [];
+    g.forEachEdge(node, (e, a, s, t) => {
+      if (!edgeVisible(e)) return;
+      const other = s === node ? t : s;
+      if (!nodeVisible(other)) return;
+      out.push({ edge: e, id: other, rel: s === node ? a.rel : (inverseLabel[a.rel] || a.rel), tier: a.tier, scope: a.scope });
+    });
+    return out;
+  }
+
   const walkRow = (r) => walkRowFmt(r, byId);
   const nodePinHtml = (node) => nodePinHtmlFmt(node, byId, neighbours(node), context, degree);
   const sourceHtml = (a) => sourceHtmlFmt(a, byId);
