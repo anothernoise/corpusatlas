@@ -728,6 +728,15 @@ def cmd_serve_mcp(args) -> int:
     return 0
 
 
+def cmd_serve_api(args) -> int:
+    """Runs zero-dependency REST API server daemon."""
+    from .rest_server import run_api_server
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8080)
+    run_api_server(graph_path=args.graph, host=host, port=port)
+    return 0
+
+
 def cmd_benchmark(args) -> int:
     """Runs micro-benchmarks across core graph algorithms and reports performance telemetry."""
     from .benchmark import run_all_benchmarks
@@ -966,6 +975,12 @@ def main(argv: list[str] | None = None) -> int:
     mcp = sub.add_parser("serve-mcp", help="start Model Context Protocol (MCP) server over stdio")
     mcp.add_argument("--graph", required=True, help="path to graph.json artifact")
     mcp.set_defaults(fn=cmd_serve_mcp)
+
+    api = sub.add_parser("serve-api", help="start zero-dependency local REST API daemon")
+    api.add_argument("--graph", required=True, help="path to graph.json artifact")
+    api.add_argument("--host", default="127.0.0.1", help="host interface to bind (default: 127.0.0.1)")
+    api.add_argument("--port", type=int, default=8080, help="port to listen on (default: 8080)")
+    api.set_defaults(fn=cmd_serve_api)
 
     cl = sub.add_parser("cluster", help="detect community clusters in graph via modularity optimization")
     cl.add_argument("--graph", required=True, help="path to graph.json")

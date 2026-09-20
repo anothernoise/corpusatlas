@@ -95,6 +95,10 @@ including [shirokoff.ca's own](https://shirokoff.ca/knowledge-base/graph.json):
   ```bash
   corpusatlas serve-mcp --graph graph.json
   ```
+- **Local Zero-Dependency REST API Daemon**: Query nodes, edges, Graph RAG context, and audit metrics over HTTP:
+  ```bash
+  corpusatlas serve-api --graph graph.json --port 8080
+  ```
 - **Hybrid BM25 + PPR Context Retrieval**: Combine lexical keyword relevance (Okapi BM25) and topological centrality (Personalized PageRank) via Reciprocal Rank Fusion:
   ```bash
   corpusatlas context --graph graph.json --entity spark --algorithm hybrid --top-k 20 --format markdown

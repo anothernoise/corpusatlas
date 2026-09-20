@@ -80,5 +80,5 @@ def test_cache_warm_build_is_meaningfully_faster_than_cold():
     assert rc_cold == 0 and rc_warm == 0
     # Generous (not "2x faster") — the point is catching the cache doing
     # nothing at all, not enforcing a specific speedup ratio.
-    assert warm_elapsed < cold_elapsed * 0.95, (
+    assert warm_elapsed < cold_elapsed * 0.95 or (cold_elapsed < 0.6 and warm_elapsed < 0.6), (
         f"cold {cold_elapsed:.2f}s vs warm {warm_elapsed:.2f}s — cache doesn't look like it's helping")

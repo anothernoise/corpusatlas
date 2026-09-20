@@ -277,3 +277,32 @@ inferred_edges = engine.evaluate(edges)
 # Inferred: entity:a -PART_OF-> entity:c (confidence: 0.9)
 ```
 
+---
+
+## 13. Zero-Dependency REST API Server (`serve-api`)
+
+Launch a local multi-threaded HTTP server daemon:
+
+```bash
+corpusatlas serve-api --graph viewer/graph.json --port 8080
+```
+
+Query with `curl` or client-side JavaScript (`fetch`):
+
+```bash
+# Health & graph metadata with ETag
+curl -i http://localhost:8080/
+
+# Query entities by name / keyword
+curl -s "http://localhost:8080/nodes?query=spark&limit=5"
+
+# Query node details and direct relationships
+curl -s "http://localhost:8080/nodes/entity:apache-spark"
+
+# Graph RAG ego-network context in Markdown
+curl -s "http://localhost:8080/context?entity=entity:apache-spark&algorithm=ppr&top_k=10&format=markdown"
+
+# Run topological health audit
+curl -s http://localhost:8080/audit
+```
+

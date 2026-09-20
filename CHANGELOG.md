@@ -13,6 +13,8 @@ with no `1.0` yet reasonably can.
   - First-class columnar dataframe exports and tabular data ingestion with zero required dependencies. Optional dependencies configured in `pyproject.toml` (`pip install corpusatlas[all]`).
 - **Model Context Protocol (MCP) Server (`corpusatlas serve-mcp`)**:
   - Full JSON-RPC 2.0 stdio server for AI coding assistants (Claude Code, Cursor, Gemini Antigravity), exposing `search_nodes`, `extract_context_ppr`, `traverse_subgraph`, `audit_graph`, and `get_provenance`.
+- **Zero-Dependency Local REST API Daemon (`corpusatlas serve-api`)**:
+  - Standard library `ThreadingHTTPServer` exposing RESTful endpoints (`/`, `/stats`, `/nodes`, `/edges`, `/context`, `/audit`) with CORS preflight support, query filtering, and content-based ETag caching (`304 Not Modified`).
 - **Hybrid BM25 + PPR Search with Reciprocal Rank Fusion (`corpusatlas context --algorithm hybrid`)**:
   - Fuses lexical keyword scoring (standard library Okapi BM25) with topological graph centrality (Personalized PageRank) via Reciprocal Rank Fusion (RRF).
 - **Hierarchical Community Clustering (`corpusatlas cluster`)**:

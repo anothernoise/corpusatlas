@@ -429,6 +429,20 @@ vindex.add("entity:spark", [0.12, 0.85, ...])
 similar = vindex.nearest_neighbors("entity:spark", top_k=5)
 ```
 
+### 15. Zero-Dependency Local REST API Daemon (`serve-api`)
+Serve your knowledge graph over standard HTTP with multi-threaded request processing, CORS preflight headers, and ETag caching (`304 Not Modified`):
+```bash
+corpusatlas serve-api --graph graph.json --port 8080
+```
+Endpoints:
+- `GET /`: Health check, API version, and graph metadata.
+- `GET /stats`: Breakdown of node and edge types.
+- `GET /nodes?query=...&type=...&limit=...`: Filter and paginate entities.
+- `GET /nodes/<node_id>`: Node details with inbound and outbound relationships.
+- `GET /edges?src=...&dst=...&rel=...`: Filter relationships.
+- `GET /context?entity=...&algorithm=ppr|bfs|hybrid&format=json|markdown`: Graph RAG ego-network context extraction.
+- `GET /audit`: Topological health checks (Gini coefficient, bridges, cycles).
+
 ## Other formats
 
 `graph.json` stays the artifact `build` writes — it's what the browser reads
