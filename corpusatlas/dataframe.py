@@ -61,7 +61,7 @@ def to_arrow(nodes: Iterable[Node], edges: Iterable[Edge]) -> tuple[Any, Any]:
     Requires pyarrow. Install via `pip install "corpusatlas[pyarrow]"`.
     """
     try:
-        import pyarrow as pa
+        import pyarrow as pa  # type: ignore[import-not-found,import-untyped]
     except ImportError as exc:
         raise ImportError(
             "pyarrow is required for to_arrow(). Install via 'pip install pyarrow' or 'pip install \"corpusatlas[pyarrow]\"'."
@@ -86,7 +86,7 @@ def to_polars(nodes: Iterable[Node], edges: Iterable[Edge]) -> tuple[Any, Any]:
     Requires polars. Install via `pip install "corpusatlas[polars]"`.
     """
     try:
-        import polars as pl
+        import polars as pl  # type: ignore[import-not-found,import-untyped]
     except ImportError as exc:
         raise ImportError(
             "polars is required for to_polars(). Install via 'pip install polars' or 'pip install \"corpusatlas[polars]\"'."
@@ -110,7 +110,7 @@ def to_pandas(nodes: Iterable[Node], edges: Iterable[Edge]) -> tuple[Any, Any]:
     Requires pandas. Install via `pip install "corpusatlas[pandas]"`.
     """
     try:
-        import pandas as pd
+        import pandas as pd  # type: ignore[import-not-found,import-untyped]
     except ImportError as exc:
         raise ImportError(
             "pandas is required for to_pandas(). Install via 'pip install pandas' or 'pip install \"corpusatlas[pandas]\"'."

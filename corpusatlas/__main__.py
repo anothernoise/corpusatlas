@@ -109,7 +109,7 @@ def cmd_build(args) -> int:
         print(f"  pipeline_store ({store_mode}) {node_cnt} nodes, {edge_cnt} edges staged in {db_path}")
         if store_mode == "duckdb" and args.out:
             duckdb_target = Path(args.out).parent / (Path(args.out).stem + ".duckdb")
-            export_duckdb(nodes, edges, out_dir=Path(args.out).parent, db_name=duckdb_target.name)
+            export_duckdb(nodes.values(), edges, out_dir=Path(args.out).parent, db_name=duckdb_target.name)
             print(f"  duckdb_store        exported native duckdb to {duckdb_target}")
     else:
         node_sets = [det_nodes, pack_nodes, ment_nodes]

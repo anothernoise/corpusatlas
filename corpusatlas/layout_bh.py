@@ -50,7 +50,8 @@ class QuadTreeNode:
             self.is_leaf = False
 
             # Re-insert existing node into child
-            self._insert_child(old_id, old_cx, old_cy, old_mass)
+            if old_id is not None:
+                self._insert_child(old_id, old_cx, old_cy, old_mass)
 
         # Update center of mass
         total_mass = self.mass + weight
@@ -72,6 +73,8 @@ class QuadTreeNode:
         ]
 
     def _insert_child(self, nid: str, x: float, y: float, weight: float) -> None:
+        if self.children is None:
+            return
         mid_x = (self.x_min + self.x_max) * 0.5
         mid_y = (self.y_min + self.y_max) * 0.5
         idx = (0 if x < mid_x else 1) + (0 if y < mid_y else 2)
@@ -101,10 +104,11 @@ class QuadTreeNode:
 
         # Otherwise, resolve internal children recursively
         fx, fy = 0.0, 0.0
-        for child in self.children:
-            cfx, cfy = child.compute_repulsion(nid, x, y, k2, theta)
-            fx += cfx
-            fy += cfy
+        if self.children:
+            for child in self.children:
+                cfx, cfy = child.compute_repulsion(nid, x, y, k2, theta)
+                fx += cfx
+                fy += cfy
         return fx, fy
 
 

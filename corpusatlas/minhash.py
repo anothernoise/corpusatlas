@@ -99,7 +99,7 @@ class LSHIndex:
             if len(bucket) > 1:
                 for i in range(len(bucket)):
                     for j in range(i + 1, len(bucket)):
-                        pair = tuple(sorted((bucket[i], bucket[j])))
+                        pair = (min(bucket[i], bucket[j]), max(bucket[i], bucket[j]))
                         candidates.add(pair)
         return candidates
 

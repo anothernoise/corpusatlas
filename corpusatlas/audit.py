@@ -13,10 +13,10 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
-from typing import Any
+from typing import Any, Sequence
 
 
-def compute_gini_coefficient(values: list[float | int]) -> float:
+def compute_gini_coefficient(values: Sequence[float | int]) -> float:
     """Calculate the Gini coefficient of a list of numbers.
 
     0 = perfect equality (every node has identical degree)
@@ -98,18 +98,23 @@ def find_directed_cycles(
             "IMPLEMENTS", "EXTENDS", "DEPENDS_ON"
         }
 
-    adj = defaultdict(list)
+    adj: dict[str, list[str]] = defaultdict(list)
     for e in edges:
         rel = e.get("rel", "")
         if rel in hierarchical_relations:
-            adj[e.get("src")].append(e.get("dst"))
+            src, dst = e.get("src"), e.get("dst")
+            if src and dst:
+                adj[str(src)].append(str(dst))
 
     visited: dict[str, int] = {}  # 0: unvisited, 1: visiting, 2: visited
     cycles: list[list[str]] = []
 
     for n in nodes:
-        root = n.get("id")
-        if not root or visited.get(root, 0) != 0:
+        raw_root = n.get("id")
+        if not raw_root:
+            continue
+        root = str(raw_root)
+        if visited.get(root, 0) != 0:
             continue
 
         stack = [(root, 0)]
@@ -137,13 +142,6 @@ def find_directed_cycles(
                 stack.pop()
                 path.pop()
                 visited[u] = 2
-
-    return cycles
-
-    for n in nodes:
-        nid = n.get("id")
-        if nid and visited.get(nid, 0) == 0:
-            dfs(nid)
 
     return cycles
 
