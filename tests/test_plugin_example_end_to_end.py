@@ -38,8 +38,12 @@ def test_the_example_plugin_package_installs_and_resolves_via_corpusatlas_build(
         venv_dir = Path(d) / "venv"
         subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True,
                        capture_output=True, text=True)
-        pip = str(venv_dir / "bin" / "pip")
-        corpusatlas_bin = str(venv_dir / "bin" / "corpusatlas")
+        # A venv's executables live under Scripts\ with a .exe suffix on
+        # Windows, bin/ with no suffix everywhere else.
+        bin_dir = venv_dir / ("Scripts" if sys.platform == "win32" else "bin")
+        suffix = ".exe" if sys.platform == "win32" else ""
+        pip = str(bin_dir / f"pip{suffix}")
+        corpusatlas_bin = str(bin_dir / f"corpusatlas{suffix}")
 
         # Installs corpusatlas itself too, since the example package
         # declares it as a dependency (dependencies=["corpusatlas"]).
