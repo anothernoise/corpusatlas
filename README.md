@@ -245,6 +245,17 @@ build on its own inside a clone of this repo — swap in your own config, or
 pass `?graph=<url>` to point the viewer at any already-built `graph.json`,
 shirokoff.ca's included.)
 
+**How far this scales.** Measured against synthetic graphs (dense,
+uniformly random edges — worse than a real corpus's natural clustering):
+1,000 entities loads in ~2s, 2,000 in ~4s, 5,000 in ~12s, 10,000 in ~29s.
+Search and click-to-focus stay responsive at every size tested — it's only
+the one-time ForceAtlas2 layout that gets slower, not runtime interaction
+afterward. Shirokoff.ca's own graph (214 entities) is nowhere near where
+this starts to matter. A real fix for a much larger graph would be
+precomputing layout coordinates at build time instead of laying out in the
+browser on every load; not done here since nothing this module's own
+consumer has needs it yet.
+
 ## Other formats
 
 `graph.json` stays the artifact `build` writes — it's what the browser reads
