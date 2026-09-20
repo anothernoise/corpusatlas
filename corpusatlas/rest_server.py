@@ -245,7 +245,8 @@ def make_api_server(
     )
 
     server = ThreadingHTTPServer((host, port), handler_cls)
-    actual_host, actual_port = server.server_address[:2]
+    actual_host = str(server.server_address[0])
+    actual_port = int(server.server_address[1])
     return server, actual_host, actual_port
 
 
