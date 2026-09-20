@@ -4,6 +4,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.8.0] — 2026-09-19
+
+### Added
+- **`corpusatlas diff --old OLD.json --new NEW.json`** — nodes and edges
+  added, removed or changed between two built graphs, plus
+  `--fail-on-change` for a CI gate asserting a rebuild is a no-op. `stats`,
+  `validate` and `diff` all take `--json` now for machine-readable output.
+- **`ontology-check --dot`** — renders a schema's own type/relation graph as
+  Graphviz DOT (`Ontology.to_dot()`), for seeing the shape of a vocabulary
+  while designing it, not just confirming it's internally consistent.
+- **A real worked example of the entry-point plugin mechanism**:
+  `examples/plugin-rss-adapter/`, a genuine installable package (a local
+  RSS/Atom feed adapter) proven end to end — a fresh venv, two editable
+  installs, a real `corpusatlas build` subprocess — not just the lookup
+  logic in isolation.
+- **`.github/workflows/release.yml`** — a `vX.Y.Z` tag push now cuts the
+  GitHub Release automatically, extracting that version's own section from
+  `CHANGELOG.md`. `CONTRIBUTING.md` documents the (now shorter) process.
+- **`tests/test_adapter_conformance.py`** — a shared contract across
+  html_blog, obsidian, logseq and web (non-empty id/title/url, kind is
+  always "article", no self-links, no duplicate ids), so a future adapter
+  drifting from what the other four already agree on gets caught here.
+
+### Changed
+- **Web adapter: connection reuse, retries, robots.txt, url dedup.**
+  Persistent HTTP(S) connections per (worker thread, host) instead of a
+  fresh TLS handshake per request — a 100-page Wikipedia benchmark went
+  from 7.81s to 5.97s. Bounded retry with backoff on a transient failure.
+  `respect_robots=True` by default: robots.txt fetched and cached once per
+  host, a disallowed url skipped, a `Crawl-delay` honoured across every
+  worker thread. Two urls that a browser would treat as the same page
+  (trailing slash, fragment, case) collapse to one document.
+- **`cmd_build` loads multiple sources concurrently** (one thread per
+  source, same principle as the web adapter's own internal concurrency),
+  instead of one after another. `BuildCache` gained a lock, since a shared
+  `--cache` is now genuinely touched from more than one thread at once.
+- **Viewer:** fixed a performance cliff at exactly 2,000 nodes — Barnes-Hut
+  layout optimisation was gated on `g.order > 2000`, so a graph just under
+  that threshold paid full brute-force O(n²) cost while one well over it
+  didn't (measured: 2,000 nodes took longer to lay out than 5,000). Lowered
+  to 200.
+
+### Investigated, not changed
+- **Memory and parallel-extraction at scale**
+  (`scripts/profile_scale.py`, written up in `docs/DESIGN.md`): both scale
+  roughly linearly, not quadratically, up to 20,000 synthetic documents
+  (295MB peak, 27s). Adapter parsing dominates build time at every size
+  tested (~50-59%) — exactly what `--cache` already addresses for a
+  rebuild — so parallelizing extraction itself isn't worth the added
+  complexity against a corpus that doesn't exist yet.
+- **The viewer's node-count ceiling**
+  (`scripts/synth_large_graph.py`, written up in the README): tested to
+  10,000 entities in a real browser. Search and click-to-focus stay
+  responsive at every size; only the one-time layout computation slows
+  down (~29s at 10,000).
+
 ## [0.7.0] — 2026-09-19
 
 ### Added
