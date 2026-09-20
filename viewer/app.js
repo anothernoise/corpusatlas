@@ -81,6 +81,10 @@ import {
 
 import { createParticleController } from './js/particles.js';
 import { createMinimapController } from './js/minimap.js';
+import { createSearchEngine } from './js/search.js';
+import { exportPng, exportSvg, exportGexf, exportGraphml } from './js/export.js';
+import { createTimelinePlayer } from './js/timeline.js';
+import { create3DGraphController } from './js/view3d.js';
 
 const urlParams = typeof window !== 'undefined' && window.location ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const GRAPH_URL = urlParams.get('data') || 'graph.json';
@@ -657,8 +661,8 @@ export async function initKbGraph(root) {
 
   try {
     layoutPositions = computeLayoutPositions(g, byId, context);
-  } catch (err) {
-    console.warn('computeLayoutPositions failed:', err);
+  } catch {
+    // Graceful fallback to default force layout
   }
 
   function switchLayout(targetMode) {
@@ -1578,19 +1582,22 @@ export async function initKbGraph(root) {
 
 
   // ---- Timeline Scrubber & Temporal Filter ----
-  const timelineEl = root.querySelector("[data-kb-timeline]");
+  const timelineEl = root.querySelector("[data-kb-timeline], [data-kb-timeline-bar]");
+  const timelineBtn = root.querySelector("[data-kb-timeline-btn]");
   const timelinePlay = root.querySelector("[data-kb-timeline-play]");
   const timelineSlider = root.querySelector("[data-kb-timeline-slider]");
   const timelineDate = root.querySelector("[data-kb-timeline-date]");
   const timelineTotal = root.querySelector("[data-kb-timeline-total]");
-  let timelinePlaying = false, timelineTimer = 0;
+
+  // If graph has no explicit dates, synthesize chronological progression steps
+  const dates = allDates.length >= 2 ? allDates : Array.from({ length: 6 }, (_, i) => `Phase ${i + 1}`);
 
   function setTimelineIndex(idx) {
-    if (idx >= allDates.length) {
+    if (idx >= dates.length) {
       timelineCutoff = null;
       if (timelineDate) timelineDate.textContent = "All time";
     } else {
-      timelineCutoff = allDates[idx];
+      timelineCutoff = dates[idx];
       if (timelineDate) timelineDate.textContent = timelineCutoff;
     }
     if (timelineSlider) timelineSlider.value = idx;
@@ -1599,38 +1606,40 @@ export async function initKbGraph(root) {
     drawMinimap();
   }
 
-  if (allDates.length >= 2 && timelineEl) {
-    timelineEl.hidden = false;
-    timelineSlider.max = allDates.length;
-    timelineSlider.value = allDates.length;
-    timelineDate.textContent = "All time";
-    timelineTotal.textContent = `${allDates[0]} – ${allDates[allDates.length - 1]}`;
+  if (timelineEl) {
+    if (timelineSlider) {
+      timelineSlider.max = dates.length;
+      timelineSlider.value = dates.length;
+    }
+    if (timelineDate) timelineDate.textContent = "All time";
+    if (timelineTotal && dates.length > 1) timelineTotal.textContent = `${dates[0]} – ${dates[dates.length - 1]}`;
 
-    timelineSlider.addEventListener("input", (e) => {
-      setTimelineIndex(parseInt(e.target.value, 10));
+    if (timelineBtn) {
+      timelineBtn.addEventListener('click', () => {
+        timelineEl.hidden = !timelineEl.hidden;
+        timelineBtn.classList.toggle('is-active', !timelineEl.hidden);
+        timelineBtn.setAttribute('aria-pressed', !timelineEl.hidden ? 'true' : 'false');
+      });
+    }
+
+    const timelinePlayer = createTimelinePlayer({
+      dates,
+      stepIntervalMs: 600,
+      onDateChange: (d, idx) => setTimelineIndex(idx),
     });
+
+    if (timelineSlider) {
+      timelineSlider.addEventListener("input", (e) => {
+        timelinePlayer.pause();
+        if (timelinePlay) timelinePlay.innerHTML = "&#9654;";
+        setTimelineIndex(parseInt(e.target.value, 10));
+      });
+    }
 
     if (timelinePlay) {
       timelinePlay.addEventListener("click", () => {
-        timelinePlaying = !timelinePlaying;
-        timelinePlay.innerHTML = timelinePlaying ? "&#9646;&#9646;" : "&#9654;";
-        if (timelinePlaying) {
-          if (parseInt(timelineSlider.value, 10) >= allDates.length) {
-            setTimelineIndex(0);
-          }
-          timelineTimer = setInterval(() => {
-            let next = parseInt(timelineSlider.value, 10) + 1;
-            if (next > allDates.length) {
-              timelinePlaying = false;
-              timelinePlay.innerHTML = "&#9654;";
-              clearInterval(timelineTimer);
-              return;
-            }
-            setTimelineIndex(next);
-          }, 350);
-        } else {
-          clearInterval(timelineTimer);
-        }
+        const playing = timelinePlayer.toggle();
+        timelinePlay.innerHTML = playing ? "&#9646;&#9646;" : "&#9654;";
       });
     }
   }
@@ -1715,6 +1724,30 @@ export async function initKbGraph(root) {
       });
       downloadBlob(new Blob([JSON.stringify({ nodes, edges }, null, 2)], { type: 'application/json' }),
         `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.json`);
+    });
+  }
+
+  const exportSvgBtn = root.querySelector('[data-kb-export-svg]');
+  if (exportSvgBtn) {
+    exportSvgBtn.addEventListener('click', () => {
+      exportSvg(g, renderer, (n) => nodeVisible(n), (e) => edgeVisible(e),
+        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.svg`);
+    });
+  }
+
+  const exportGexfBtn = root.querySelector('[data-kb-export-gexf]');
+  if (exportGexfBtn) {
+    exportGexfBtn.addEventListener('click', () => {
+      exportGexf(g, byId,
+        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.gexf`);
+    });
+  }
+
+  const exportGraphmlBtn = root.querySelector('[data-kb-export-graphml]');
+  if (exportGraphmlBtn) {
+    exportGraphmlBtn.addEventListener('click', () => {
+      exportGraphml(g, byId,
+        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.graphml`);
     });
   }
 
@@ -2004,15 +2037,8 @@ export async function initKbGraph(root) {
     return { match: true, score, highlight: hl };
   }
 
-  // Search index over names, aliases, and descriptions
-  const index = entities.map((n) => {
-    const meta = byId.get(n.id);
-    const desc = meta && meta.meta && meta.meta.description ? meta.meta.description : "";
-    return {
-      id: n.id, label: n.label, type: n.type, desc,
-      terms: [n.label, ...(n.aliases || [])],
-    };
-  });
+  // Full-text search engine over entities, aliases, descriptions, and context
+  const searchEngine = createSearchEngine(entities, context);
   let suggestions = [], active = -1, recentMode = false, currentQuery = "";
   const RECENT_KEY = `${STORE_KEY}:recent`;
   function loadRecent() {
@@ -2040,8 +2066,10 @@ export async function initKbGraph(root) {
     if (!recent.length) return;
     recentMode = true;
     currentQuery = "";
-    suggestions = recent.map((id) => index.find((it) => it.id === id)).filter(Boolean)
-      .map((it) => ({ ...it, highlight: esc(it.label) }));
+    suggestions = recent.map((id) => {
+      const it = byId.get(id);
+      return it ? { id: it.id, label: it.label, type: it.type, highlight: esc(it.label) } : null;
+    }).filter(Boolean);
     active = -1;
     renderSuggest();
   }
@@ -2051,26 +2079,13 @@ export async function initKbGraph(root) {
     recentMode = false;
     currentQuery = q;
     if (!q) { showRecent(); return; }
-    const results = [];
-    for (const it of index) {
-      let bestMatch = null;
-      // Test main label and aliases
-      for (const term of it.terms) {
-        const m = fuzzyMatch(term, q);
-        if (m.match && (!bestMatch || m.score < bestMatch.score)) {
-          bestMatch = { ...m, highlight: m.highlight };
-        }
-      }
-      // Test description as fallback
-      if (!bestMatch && it.desc) {
-        const m = fuzzyMatch(it.desc, q);
-        if (m.match) bestMatch = { match: true, score: 8, highlight: `${esc(it.label)} <small style="opacity:0.7">(${m.highlight})</small>` };
-      }
-      if (bestMatch && bestMatch.score < 20) {
-        results.push({ ...it, s: bestMatch.score, highlight: bestMatch.highlight });
-      }
-    }
-    suggestions = results.sort((a, b) => a.s - b.s || (degree.get(b.id) || 0) - (degree.get(a.id) || 0)).slice(0, 8);
+    const results = searchEngine.search(q, { limit: 8, filterTypes: hiddenTypes });
+    suggestions = results.map((r) => ({
+      id: r.id,
+      label: r.label,
+      type: r.type,
+      highlight: esc(r.label),
+    }));
     active = suggestions.length ? 0 : -1;
     renderSuggest();
   }
@@ -2312,6 +2327,23 @@ export async function initKbGraph(root) {
   checkParticlesState = () => {
     particleController.checkState(selected, pathMode, pathEdgeSet);
   };
+
+  // ---- 3D Force-Directed Graph Mode ----
+  const threeDContainer = root.querySelector('[data-kb-3d-container]');
+  const threeDToggleBtn = root.querySelector('[data-kb-3d-toggle]');
+  if (threeDContainer && threeDToggleBtn) {
+    const controller3D = create3DGraphController({
+      container: threeDContainer,
+      graph: g,
+      byId,
+      onNodeClick: (id) => select(id),
+    });
+    threeDToggleBtn.addEventListener('click', async () => {
+      const active = controller3D.toggle();
+      threeDToggleBtn.classList.toggle('is-active', active);
+      threeDToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
 
   drawMinimap();
 

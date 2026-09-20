@@ -49,6 +49,14 @@
         <span>Hubs</span>
       </button>
 
+      <button type="button" class="kb-expand-btn" data-kb-3d-toggle aria-label="Toggle 3D Force-Directed Graph View" title="3D WebGL Mode">
+        <span>3D</span>
+      </button>
+
+      <button type="button" class="kb-expand-btn" data-kb-timeline-btn aria-label="Toggle Temporal Evolution Player" title="Time-Travel Timeline">
+        <span>Timeline</span>
+      </button>
+
       <button type="button" class="kb-expand-btn" data-kb-export-png aria-label="Export high-resolution PNG snapshot" title="Export PNG">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         <span>Export</span>
@@ -84,6 +92,12 @@
   <div class="kb-stage" data-kb-stage tabindex="0" aria-label="Knowledge graph. Search with slash, F to fit, Alt+arrows for history, arrow keys to move through a focused entity's connections.">
     <div class="kb-canvas" data-kb-canvas></div>
     <canvas class="kb-particles-canvas" data-kb-particles></canvas>
+    <div class="kb-3d-container" data-kb-3d-container hidden style="position:absolute; inset:0; z-index:4; background:#090d16;"></div>
+    <div class="kb-timeline-bar" data-kb-timeline-bar hidden style="position:absolute; bottom:1.2rem; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:0.6rem; background:var(--surface, #1e293b); padding:0.4rem 0.9rem; border-radius:999px; border:1px solid var(--border, rgba(255,255,255,0.15)); box-shadow:0 8px 24px rgba(0,0,0,0.3); z-index:10;">
+      <button type="button" class="kb-btn" data-kb-timeline-play style="padding:2px 8px; font-size:0.75rem; border-radius:4px; cursor:pointer;">▶ Play</button>
+      <input type="range" data-kb-timeline-slider min="0" max="0" value="0" style="width:160px; cursor:pointer;">
+      <span data-kb-timeline-date style="font-size:0.75rem; font-family:monospace; min-width:80px; text-align:right;"></span>
+    </div>
 
 
     <!-- Left Settings Panel -->
@@ -123,9 +137,11 @@
           <button type="button" class="kb-panel-btn" data-kb-animate>Animate</button>
           <button type="button" class="kb-panel-btn" data-kb-undo-layout hidden>Undo layout</button>
           <div class="kb-sec-sub" style="margin-top:0.6rem;"><span>Edge colour</span></div>
-          <div class="kb-edge-legend" data-kb-edge-legend></div>
-          <div class="kb-export-row">
+          <div class="kb-export-row" style="display:flex; flex-wrap:wrap; gap:0.4rem;">
             <button type="button" class="kb-panel-btn" data-kb-export-png>Export PNG</button>
+            <button type="button" class="kb-panel-btn" data-kb-export-svg>Export SVG</button>
+            <button type="button" class="kb-panel-btn" data-kb-export-gexf>Export GEXF</button>
+            <button type="button" class="kb-panel-btn" data-kb-export-graphml>Export GraphML</button>
             <button type="button" class="kb-panel-btn" data-kb-export-json>Export JSON</button>
           </div>
         </details>
