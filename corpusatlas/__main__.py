@@ -14,7 +14,7 @@ from .adapters import build as build_adapter
 from .cache import BuildCache
 from .csv_export import write_csv
 from .emit import SCHEMA_VERSION, write_graph
-from .extract import DeterministicExtractor, MentionsExtractor, PacksExtractor
+from .extract import DeterministicExtractor, Extractor, MentionsExtractor, PacksExtractor
 from .graphml import write_graphml
 from .merge import merge
 from .neo4j_export import write_neo4j_csv
@@ -73,12 +73,15 @@ def cmd_build(args) -> int:
     # it can only ADD reach, never relabel or override a hand-written or
     # reviewed claim. Sequential, not a uniform loop, because mentions needs
     # to see what the earlier tiers named before it can search for it.
-    det = DeterministicExtractor(resolver=resolver, ontology=ontology)
-    det_nodes, det_edges = (list(x) for x in det.run(docs))
-    packs = PacksExtractor.from_config(cfg, resolver=resolver, ontology=ontology)
-    pack_nodes, pack_edges = (list(x) for x in packs.run(docs))
-    mentions = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver, ontology=ontology)
-    ment_nodes, ment_edges = (list(x) for x in mentions.run(docs))
+    det: Extractor = DeterministicExtractor(resolver=resolver, ontology=ontology)
+    det_out_nodes, det_out_edges = det.run(docs)
+    det_nodes, det_edges = list(det_out_nodes), list(det_out_edges)
+    packs: Extractor = PacksExtractor.from_config(cfg, resolver=resolver, ontology=ontology)
+    packs_out_nodes, packs_out_edges = packs.run(docs)
+    pack_nodes, pack_edges = list(packs_out_nodes), list(packs_out_edges)
+    mentions: Extractor = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver, ontology=ontology)
+    ment_out_nodes, ment_out_edges = mentions.run(docs)
+    ment_nodes, ment_edges = list(ment_out_nodes), list(ment_out_edges)
 
     for ex_name, n, e in ((det.name, det_nodes, det_edges),
                           (packs.name, pack_nodes, pack_edges),

@@ -60,6 +60,23 @@ with no `1.0` yet reasonably can.
   responsive at every size; only the one-time layout computation slows
   down (~29s at 10,000).
 
+### Fixed
+- `extract/base.py`'s `Extractor` protocol was dead scaffolding — written for
+  a planned tier before `packs.py` (curated) and `mentions.py` (extracted)
+  shipped, never imported anywhere, 0% coverage. `DeterministicExtractor`,
+  `PacksExtractor` and `MentionsExtractor` already satisfied it structurally,
+  so `__main__.py`'s `cmd_build` now annotates each with it — which is
+  actual signal: it turned up that `det_nodes, det_edges = (list(x) for x in
+  det.run(docs))` had been type-unsound the whole time. Concretely-typed,
+  `run()`'s two-tuple return joined to `list[Any]` and mypy waved it
+  through; typed through the protocol's `Iterable[Node] | Iterable[Edge]`,
+  the same join is covariant and lands on a real `list[object]`, which
+  mypy correctly rejected at the `MentionsExtractor(det_nodes + pack_nodes,
+  ...)` call. Replaced the generator idiom with direct tuple unpacking at
+  all three call sites, which types each side by position instead of by
+  join. Also updated the protocol's docstring and `tier` comment, which
+  still described only two tiers.
+
 ## [0.7.0] — 2026-09-19
 
 ### Added
