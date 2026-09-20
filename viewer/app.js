@@ -288,10 +288,29 @@ export async function initKbGraph(root) {
   const suggestEl = $('[data-kb-suggest]');
 
   let data;
+  let isTiled = false;
+  let tileManifest = null;
+  let tileBaseUrl = "";
   try {
     const res = await fetch(GRAPH_URL);
     if (!res.ok) throw new Error(`graph.json ${res.status}`);
     data = await res.json();
+    if (data.bbox && data.max_zoom !== undefined) {
+      isTiled = true;
+      tileManifest = data;
+      tileBaseUrl = GRAPH_URL.includes("/") ? GRAPH_URL.substring(0, GRAPH_URL.lastIndexOf("/")) : "tiles";
+      const rootRes = await fetch(`${tileBaseUrl}/0/0_0.json`);
+      if (rootRes.ok) {
+        const rootTile = await rootRes.json();
+        data = {
+          version: "corpusatlas-graph/v1",
+          counts: { nodes: tileManifest.node_count, edges: tileManifest.edge_count },
+          generated: new Date().toISOString().slice(0, 10),
+          nodes: rootTile.nodes || [],
+          edges: rootTile.edges || [],
+        };
+      }
+    }
   } catch (err) {
     if (loading) loading.hidden = true;
     status.textContent =
@@ -650,7 +669,7 @@ export async function initKbGraph(root) {
   // Extract date metadata for temporal evolution
   const nodeDates = new Map();
   for (const n of data.nodes) {
-    let dt = n.meta && (n.meta.date || n.meta.reviewed || n.meta.edition);
+    let dt = (n.valid_from || n.date) || (n.meta && (n.meta.valid_from || n.meta.date || n.meta.reviewed || n.meta.edition));
     if (!dt && context.has(n.id)) {
       const arts = context.get(n.id).articles;
       if (arts && arts.length > 0) {
@@ -665,12 +684,30 @@ export async function initKbGraph(root) {
 
   const nodeVisible = (n) => {
     if (hiddenTypes.has(g.getNodeAttribute(n, "kind"))) return false;
-    if (timelineCutoff && nodeDates.has(n) && nodeDates.get(n) > timelineCutoff) return false;
+    if (timelineCutoff) {
+      const nData = byId.get(n);
+      const vFrom = nData?.valid_from || nData?.meta?.valid_from || nodeDates.get(n);
+      const vTo = nData?.valid_to || nData?.meta?.valid_to;
+      if (vFrom && vFrom > timelineCutoff) return false;
+      if (vTo && vTo < timelineCutoff) return false;
+    }
     return S.orphans || (visDeg.get(n) || 0) > 0;
   };
   const edgeVisible = (e) => {
     if (!allowedRels.has(g.getEdgeAttribute(e, 'rel'))) return false;
     const [s, t] = g.extremities(e);
+    if (timelineCutoff) {
+      const sData = byId.get(s), tData = byId.get(t);
+      const sFrom = sData?.valid_from || sData?.meta?.valid_from || nodeDates.get(s);
+      const sTo = sData?.valid_to || sData?.meta?.valid_to;
+      if (sFrom && sFrom > timelineCutoff) return false;
+      if (sTo && sTo < timelineCutoff) return false;
+
+      const tFrom = tData?.valid_from || tData?.meta?.valid_from || nodeDates.get(t);
+      const tTo = tData?.valid_to || tData?.meta?.valid_to;
+      if (tFrom && tFrom > timelineCutoff) return false;
+      if (tTo && tTo < timelineCutoff) return false;
+    }
     return !hiddenTypes.has(g.getNodeAttribute(s, 'kind')) && !hiddenTypes.has(g.getNodeAttribute(t, 'kind'));
   };
 
@@ -1211,6 +1248,95 @@ export async function initKbGraph(root) {
       try { localStorage.setItem(CAMERA_STORE_KEY, JSON.stringify(camera.getState())); } catch (err) { /* ignore */ }
     }, 400);
   });
+
+  // ---- LOD Quadtree Tile Streaming ----
+  if (isTiled && tileManifest) {
+    const loadedTiles = new Set(["0/0_0"]);
+    let tileFetchDebounce = 0;
+
+    async function checkVisibleTiles() {
+      const state = camera.getState();
+      const [bboxMinX, bboxMinY, bboxMaxX, bboxMaxY] = tileManifest.bbox;
+      const spanX = Math.max(bboxMaxX - bboxMinX, 1);
+      const spanY = Math.max(bboxMaxY - bboxMinY, 1);
+
+      const zoom = Math.min(tileManifest.max_zoom, Math.max(0, Math.floor(-Math.log2(Math.max(state.ratio, 0.001)))));
+      const gridSize = 2 ** zoom;
+
+      const w = stage.clientWidth || 800;
+      const h = stage.clientHeight || 600;
+      const halfW = (w / 2) * state.ratio;
+      const halfH = (h / 2) * state.ratio;
+
+      const viewMinX = state.x - halfW;
+      const viewMaxX = state.x + halfW;
+      const viewMinY = state.y - halfH;
+      const viewMaxY = state.y + halfH;
+
+      const normMinX = Math.max(0, Math.min(1, (viewMinX - bboxMinX) / spanX));
+      const normMaxX = Math.max(0, Math.min(1, (viewMaxX - bboxMinX) / spanX));
+      const normMinY = Math.max(0, Math.min(1, (viewMinY - bboxMinY) / spanY));
+      const normMaxY = Math.max(0, Math.min(1, (viewMaxY - bboxMinY) / spanY));
+
+      const minGx = Math.min(Math.floor(normMinX * gridSize), gridSize - 1);
+      const maxGx = Math.min(Math.floor(normMaxX * gridSize), gridSize - 1);
+      const minGy = Math.min(Math.floor(normMinY * gridSize), gridSize - 1);
+      const maxGy = Math.min(Math.floor(normMaxY * gridSize), gridSize - 1);
+
+      for (let gx = minGx; gx <= maxGx; gx++) {
+        for (let gy = minGy; gy <= maxGy; gy++) {
+          const tileKey = `${zoom}/${gx}_${gy}`;
+          if (loadedTiles.has(tileKey)) continue;
+          loadedTiles.add(tileKey);
+
+          fetch(`${tileBaseUrl}/${tileKey}.json`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((tile) => {
+              if (!tile) return;
+              let added = false;
+              for (const n of tile.nodes || []) {
+                if (!g.hasNode(n.id)) {
+                  byId.set(n.id, n);
+                  const x = (n.meta && n.meta.pos) ? n.meta.pos[0] : (n.meta && n.meta.x != null ? n.meta.x : 0);
+                  const y = (n.meta && n.meta.pos) ? n.meta.pos[1] : (n.meta && n.meta.y != null ? n.meta.y : 0);
+                  g.addNode(n.id, {
+                    label: n.label,
+                    size: 4,
+                    color: TYPE_COLOR[n.type] || '#64748b',
+                    x,
+                    y,
+                    kind: n.type,
+                  });
+                  added = true;
+                }
+              }
+              for (const e of tile.edges || []) {
+                if (g.hasNode(e.src) && g.hasNode(e.dst) && !g.hasEdge(e.src, e.dst)) {
+                  g.addEdge(e.src, e.dst, {
+                    rel: e.rel,
+                    size: 1,
+                    color: '#475569',
+                  });
+                  added = true;
+                }
+              }
+              if (added) {
+                computeVisDeg();
+                renderer.refresh({ skipIndexation: true });
+                drawMinimap();
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+
+    camera.on('updated', () => {
+      clearTimeout(tileFetchDebounce);
+      tileFetchDebounce = setTimeout(checkVisibleTiles, 150);
+    });
+    checkVisibleTiles();
+  }
   let flyTimer = 0;
   function moveCamera(state, duration = 450) {
     const target = { ...camera.getState(), ...state };

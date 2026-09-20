@@ -14,11 +14,13 @@ from .adapters import build as build_adapter
 from .cache import BuildCache
 from .csv_export import write_csv
 from .emit import SCHEMA_VERSION, write_graph
+from .export import export_duckdb
 from .extract import DeterministicExtractor, Extractor, MentionsExtractor, PacksExtractor
 from .graphml import write_graphml
 from .merge import merge
 from .neo4j_export import write_neo4j_csv
 from .ontology import DEFAULT, Ontology, OntologyError, TIERS
+from .pipeline_store import SQLitePipelineStore
 from .rdf_export import DEFAULT_BASE, write_turtle
 from .resolve import RegistryError, Resolver
 
@@ -88,9 +90,31 @@ def cmd_build(args) -> int:
                           (mentions.name, ment_nodes, ment_edges)):
         print(f"  {ex_name:<20} {len(n):>4} nodes, {len(e)} edges")
 
-    node_sets = [det_nodes, pack_nodes, ment_nodes]
-    edge_sets = [det_edges, pack_edges, ment_edges]
-    nodes, edges = merge(node_sets, edge_sets, live_doc_ids={d.id for d in docs})
+    store_mode = getattr(args, "store", "memory")
+    if store_mode in ("sqlite", "duckdb"):
+        db_path = getattr(args, "db_path", None)
+        if not db_path:
+            db_path = str(Path(args.out).with_suffix(".db")) if args.out else ":memory:"
+        store = SQLitePipelineStore(db_path)
+        store.add_tier_nodes(det_nodes, tier_order=0)
+        store.add_tier_edges(det_edges, tier_order=0)
+        store.add_tier_nodes(pack_nodes, tier_order=1)
+        store.add_tier_edges(pack_edges, tier_order=1)
+        store.add_tier_nodes(ment_nodes, tier_order=2)
+        store.add_tier_edges(ment_edges, tier_order=2)
+        node_cnt, edge_cnt = store.compact(live_doc_ids={d.id for d in docs})
+        nodes = {n.id: n for n in store.stream_nodes()}
+        edges = list(store.stream_edges())
+        store.close()
+        print(f"  pipeline_store ({store_mode}) {node_cnt} nodes, {edge_cnt} edges staged in {db_path}")
+        if store_mode == "duckdb" and args.out:
+            duckdb_target = Path(args.out).parent / (Path(args.out).stem + ".duckdb")
+            export_duckdb(nodes, edges, out_dir=Path(args.out).parent, db_name=duckdb_target.name)
+            print(f"  duckdb_store        exported native duckdb to {duckdb_target}")
+    else:
+        node_sets = [det_nodes, pack_nodes, ment_nodes]
+        edge_sets = [det_edges, pack_edges, ment_edges]
+        nodes, edges = merge(node_sets, edge_sets, live_doc_ids={d.id for d in docs})
     if args.dry_run:
         print(f"\n(dry run) would write {len(nodes)} nodes, {len(edges)} edges — nothing written")
         return 0
@@ -466,14 +490,18 @@ def cmd_context(args) -> int:
     depth = int(getattr(args, "depth", 1))
     alpha = float(getattr(args, "alpha", 0.15))
 
-    res = extract_rag_subgraph(
-        g,
-        args.entity,
-        algorithm=algo,
-        top_k=top_k,
-        depth=depth,
-        alpha=alpha,
-    )
+    if algo == "hybrid":
+        from .hybrid_search import hybrid_graph_search
+        res = hybrid_graph_search(g, query=args.entity, top_k=top_k)
+    else:
+        res = extract_rag_subgraph(
+            g,
+            args.entity,
+            algorithm=algo,
+            top_k=top_k,
+            depth=depth,
+            alpha=alpha,
+        )
 
     if "error" in res:
         print(res["error"], file=sys.stderr)
@@ -575,6 +603,23 @@ def cmd_tile(args) -> int:
     return 0
 
 
+def cmd_as_of(args) -> int:
+    """Filters graph to a historical point-in-time snapshot."""
+    from .temporal import filter_as_of
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    filtered = filter_as_of(g, args.date)
+
+    if getattr(args, "out", None):
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(filtered, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote as-of {args.date} snapshot to {out_path}: {filtered['counts']['nodes']} nodes, {filtered['counts']['edges']} edges")
+    else:
+        print(json.dumps(filtered, indent=2))
+    return 0
+
+
 def cmd_audit(args) -> int:
     """Audits graph quality, connectivity, cycle anomalies, and structural integrity."""
     from .audit import audit_graph
@@ -644,6 +689,66 @@ def cmd_infer(args) -> int:
         print(f"wrote {len(inferred)} inferred edges to {args.out}")
     else:
         print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_cluster(args) -> int:
+    """Detects community clusters in the graph using modularity optimization."""
+    from .community import detect_communities, evaluate_modularity
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    nodes = g.get("nodes", [])
+    edges = g.get("edges", [])
+    assignment, clusters = detect_communities(nodes, edges, resolution=float(getattr(args, "resolution", 1.0)))
+    modularity = evaluate_modularity(nodes, edges, assignment)
+
+    for n in nodes:
+        n["community_id"] = assignment.get(n["id"], 0)
+
+    g["communities"] = clusters
+    g["modularity"] = round(modularity, 4)
+
+    if getattr(args, "out", None):
+        out_path = Path(args.out)
+        out_path.write_text(json.dumps(g, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote clustered graph to {out_path} ({len(clusters)} communities, modularity {modularity:.3f})")
+    else:
+        print(f"Detected {len(clusters)} communities (modularity Q = {modularity:.3f}):\n")
+        for c in clusters:
+            types_str = ", ".join(f"{k}: {v}" for k, v in c["dominant_types"].items())
+            print(f"  [{c['community_id']}] {c['label']:<30} {c['size']:>4} nodes ({types_str})")
+    return 0
+
+
+def cmd_serve_mcp(args) -> int:
+    """Runs standard I/O Model Context Protocol (MCP) server."""
+    from .mcp_server import MCPServer
+    server = MCPServer(graph_path=args.graph)
+    server.serve_stdio()
+    return 0
+
+
+def cmd_benchmark(args) -> int:
+    """Runs micro-benchmarks across core graph algorithms and reports performance telemetry."""
+    from .benchmark import run_all_benchmarks
+    quick = getattr(args, "quick", False)
+    print("Running CorpusAtlas performance benchmarks...")
+    report = run_all_benchmarks(quick=quick)
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+        return 0
+
+    bm = report["benchmarks"]
+    print("\n[Barnes-Hut Layout]")
+    print(f"  Nodes: {bm['barnes_hut']['num_nodes']}, Edges: {bm['barnes_hut']['num_edges']}")
+    print(f"  Throughput: {bm['barnes_hut']['iterations_per_sec']} iterations/sec ({bm['barnes_hut']['duration_ms']} ms)")
+
+    print("\n[Aho-Corasick Keyword Scanner]")
+    print(f"  Patterns: {bm['aho_corasick']['num_patterns']}, Scanned: {bm['aho_corasick']['chars_scanned']} chars")
+    print(f"  Throughput: {bm['aho_corasick']['chars_per_sec']:,.0f} chars/sec ({bm['aho_corasick']['scan_duration_ms']} ms)")
+
+    print("\n[Datalog-Lite Fixpoint Inference]")
+    print(f"  Input: {bm['datalog']['initial_edges']} edges -> Inferred: {bm['datalog']['inferred_edges']} edges in {bm['datalog']['duration_ms']} ms")
     return 0
 
 
@@ -758,6 +863,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--cache",
                    help="path to a file-parse cache (html_blog/obsidian/logseq only); "
                         "created if missing, reused and updated if present")
+    b.add_argument("--store", choices=["memory", "sqlite", "duckdb"], default="memory",
+                   help="pipeline deduplication & staging engine: memory (default), sqlite (disk out-of-core), or duckdb")
+    b.add_argument("--db-path",
+                   help="path to disk database file for --store sqlite or --store duckdb")
     b.set_defaults(fn=cmd_build)
 
     s = sub.add_parser("stats", help="summarise a built graph")
@@ -783,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = sub.add_parser("context", help="format ego-network context for LLM Graph RAG")
     ctx.add_argument("--graph", required=True, help="path to graph.json")
     ctx.add_argument("--entity", required=True, help="entity id or label to focus on")
-    ctx.add_argument("--algorithm", choices=["ppr", "bfs"], default="ppr", help="extraction algorithm (ppr or bfs)")
+    ctx.add_argument("--algorithm", choices=["ppr", "bfs", "hybrid"], default="ppr", help="extraction algorithm (ppr, bfs, or hybrid)")
     ctx.add_argument("--depth", type=int, default=1, choices=[1, 2], help="ego network hop depth (for bfs)")
     ctx.add_argument("--top-k", type=int, default=20, help="max nodes to extract (for ppr)")
     ctx.add_argument("--alpha", type=float, default=0.15, help="restart probability for PPR")
@@ -802,6 +911,12 @@ def main(argv: list[str] | None = None) -> int:
     til.add_argument("--out-dir", default="tiles", help="output directory for tiles")
     til.add_argument("--max-zoom", type=int, default=3, help="max zoom level (0..N)")
     til.set_defaults(fn=cmd_tile)
+
+    asof = sub.add_parser("as-of", help="filter graph to a historical point-in-time snapshot")
+    asof.add_argument("--graph", required=True, help="path to graph.json")
+    asof.add_argument("--date", required=True, help="ISO date string (YYYY-MM-DD) for point-in-time snapshot")
+    asof.add_argument("--out", help="output path for snapshot json")
+    asof.set_defaults(fn=cmd_as_of)
 
     aud = sub.add_parser("audit", help="audit graph quality, connectivity, cycle anomalies, and structural integrity")
     aud.add_argument("--graph", required=True, help="path to graph.json")
@@ -847,6 +962,21 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--out-dir", help="output directory, for --format csv or neo4j")
     c.add_argument("--base", help=f"resource IRI base, for --format turtle (default: {DEFAULT_BASE})")
     c.set_defaults(fn=cmd_convert)
+
+    mcp = sub.add_parser("serve-mcp", help="start Model Context Protocol (MCP) server over stdio")
+    mcp.add_argument("--graph", required=True, help="path to graph.json artifact")
+    mcp.set_defaults(fn=cmd_serve_mcp)
+
+    cl = sub.add_parser("cluster", help="detect community clusters in graph via modularity optimization")
+    cl.add_argument("--graph", required=True, help="path to graph.json")
+    cl.add_argument("--resolution", type=float, default=1.0, help="modularity resolution parameter (default: 1.0)")
+    cl.add_argument("--out", help="output path to write graph with community annotations")
+    cl.set_defaults(fn=cmd_cluster)
+
+    bm = sub.add_parser("benchmark", help="run performance micro-benchmarks and report telemetry")
+    bm.add_argument("--quick", action="store_true", help="run faster benchmark with smaller graph")
+    bm.add_argument("--json", action="store_true", help="output report as JSON")
+    bm.set_defaults(fn=cmd_benchmark)
 
     oc = sub.add_parser("ontology-check", help="validate a schema file on its own, no corpus needed")
     oc.add_argument("--schema", required=True)

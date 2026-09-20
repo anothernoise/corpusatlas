@@ -258,18 +258,91 @@ precomputing layout coordinates at build time instead of laying out in the
 browser on every load; not done here since nothing this module's own
 consumer has needs it yet.
 
+## Storage Engines & Out-of-Core Build
+
+For corpora with hundreds of thousands of claims, `corpusatlas build` supports out-of-core deduplication and staging engines:
+
+```bash
+# In-memory deduplication (default):
+corpusatlas build --config corpusatlas.toml --out graph.json --store memory
+
+# Disk-backed SQLite staging (bounded memory footprint):
+corpusatlas build --config corpusatlas.toml --out graph.json --store sqlite --db-path staging.db
+
+# DuckDB-backed analytical staging:
+corpusatlas build --config corpusatlas.toml --out graph.json --store duckdb --db-path staging.duckdb
+```
+
+## DataFrame Interoperability & Ingestion
+
+CorpusAtlas provides first-class, zero-copy interoperability with Polars, Apache Arrow, and Pandas (`pip install corpusatlas[all]`):
+
+```python
+import corpusatlas as ca
+
+# Load graph into tabular dataframes
+graph_data = ca.load_graph("graph.json")
+
+# Zero required dependencies — standard dict records
+records = graph_data.to_dict_records()
+
+# Optional high-performance columnar formats:
+nodes_pl, edges_pl = graph_data.to_polars()
+nodes_pa, edges_pa = graph_data.to_arrow()
+nodes_df, edges_df = graph_data.to_pandas()
+```
+
+Tabular sources can also be ingested directly via `DataFrameAdapter`:
+```python
+from corpusatlas.adapters.dataframe import DataFrameAdapter
+
+adapter = DataFrameAdapter({"nodes": my_nodes_df, "edges": my_edges_df})
+docs = list(adapter.documents())
+```
+
 ## Graph RAG, Analytics & Advanced Tooling
 
 Beyond building static graphs, CorpusAtlas provides a comprehensive zero-dependency backend toolkit:
 
-### 1. Graph RAG Subgraph Extraction (Personalized PageRank)
-Extract an entity's semantic ego-network formatted for LLM prompts using random walks with restart (PPR):
+### 1. Model Context Protocol (MCP) Server (`serve-mcp`)
+Expose your knowledge graph to AI coding assistants (Claude Desktop, Cursor, Gemini Antigravity) over standard I/O:
 ```bash
-corpusatlas context --graph graph.json --entity "Apache Spark" --algorithm ppr --top-k 20 --format markdown
+corpusatlas serve-mcp --graph graph.json
 ```
-Supports `--algorithm ppr|bfs`, `--top-k <N>`, `--depth 1|2`, and `--format markdown|json`.
+Available tools:
+- `search_nodes(query, type_filter)`: Substring and alias search.
+- `extract_context_ppr(entity, top_k, alpha)`: Personalized PageRank ego-network retrieval.
+- `traverse_subgraph(start_node_id, depth, allowed_rels)`: Bounded BFS expansion.
+- `audit_graph()`: Topological health, bridge detection, and cycle metrics.
+- `get_provenance(edge_id)`: Source document audit trail and confidence.
 
-### 2. Knowledge Graph Auditing & Quality Metrics
+### 2. Hybrid BM25 + PPR Search with Reciprocal Rank Fusion
+Combines lexical keyword relevance (Okapi BM25) with topological graph centrality (Personalized PageRank) using Reciprocal Rank Fusion:
+```bash
+corpusatlas context --graph graph.json --entity "Apache Spark" --algorithm hybrid --top-k 20
+```
+
+### 3. Hierarchical Community Detection (Louvain Modularity)
+Clusters the knowledge graph into thematic communities by maximizing modularity ($Q$):
+```bash
+corpusatlas cluster --graph graph.json --resolution 1.0 --out clustered_graph.json
+```
+
+### 4. Bi-Temporal Historical Snapshots (`as-of`)
+Filter graphs to point-in-time states using valid-time (`valid_from`, `valid_to`) intervals and transaction time:
+```bash
+corpusatlas as-of --graph graph.json --date "2024-01-01" --out snapshot_2024.json
+```
+In the interactive viewer, a timeline scrubber slider provides real-time playback of graph evolution over time.
+
+### 5. Performance Telemetry & Automated Micro-Benchmarks
+Measure core engine throughput across Barnes-Hut layout, Aho-Corasick scanning, and Datalog fixpoint evaluation:
+```bash
+corpusatlas benchmark --quick
+corpusatlas benchmark --json
+```
+
+### 6. Knowledge Graph Auditing & Quality Metrics
 Run topological graph health checks to identify cycle anomalies, bridge bottlenecks, hub concentration, and contradictory relations:
 ```bash
 corpusatlas audit --graph graph.json
@@ -280,20 +353,20 @@ Computes:
 - **Hierarchical Cycle Detection**: Detects invalid circular taxonomic/hierarchical relations.
 - **Contradiction Detection**: Flags conflicting reciprocal relationships between identical entities.
 
-### 3. Declarative Schema Migration
+### 7. Declarative Schema Migration
 Refactor entity types and relationship names on an existing `graph.json` without re-running long corpus builds:
 ```bash
 corpusatlas migrate --graph graph.json --migration migration.toml --out migrated.json
 ```
 
-### 4. Spatial Quadtree LOD Tiling
+### 8. Spatial Quadtree LOD Tiling & Streaming Viewer
 For massive graphs, partition 2D layout coordinates into a multi-resolution quadtree pyramid for client-side streaming:
 ```bash
 corpusatlas tile --graph graph.json --out-dir tiles/ --max-zoom 3
 ```
-Emits `tiles/{z}/{x}_{y}.json` and `manifest.json`.
+Emits `tiles/{z}/{x}_{y}.json` and `manifest.json`. The web viewer automatically streams visible bounding-box tiles on zoom and pan.
 
-### 5. Multi-Format Export (DuckDB, Parquet, Cypher, RDF Turtle)
+### 9. Multi-Format Export (DuckDB, Parquet, Cypher, RDF Turtle)
 
 Export `graph.json` for analytical SQL engines, columnar storage, and graph databases:
 

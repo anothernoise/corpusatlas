@@ -29,8 +29,9 @@ def write_graph(path: Path, nodes: dict, edges: list, *, sources: list[str],
         degree[e.dst] = degree.get(e.dst, 0) + 1
 
     present = {e.rel for e in edges}
+    node_list = list(nodes.values()) if isinstance(nodes, dict) else list(nodes)
     node_dicts = [dict(n.to_json(), degree=degree.get(n.id, 0))
-                  for n in sorted(nodes.values(), key=lambda n: n.id)]
+                  for n in sorted(node_list, key=lambda n: n.id)]
     edge_dicts = [e.to_json() for e in sorted(edges, key=lambda e: e.key)]
 
     if layout:

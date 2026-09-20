@@ -18,6 +18,7 @@ from importlib.metadata import entry_points as _entry_points
 
 from ..cache import BuildCache
 from .entity_packs import EntityPacksAdapter
+from .dataframe import DataFrameAdapter
 from .html_blog import HtmlBlogAdapter
 from .logseq import LogseqAdapter
 from .obsidian import ObsidianAdapter
@@ -26,6 +27,7 @@ from .radar_scorecards import RadarScorecardsAdapter
 from .web import WebAdapter
 
 REGISTRY = {
+    "dataframe": DataFrameAdapter,
     "entity_packs": EntityPacksAdapter,
     "html_blog": HtmlBlogAdapter,
     "logseq": LogseqAdapter,

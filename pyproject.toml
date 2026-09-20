@@ -1,6 +1,6 @@
 [project]
 name = "corpusatlas"
-version = "0.9.0"
+version = "0.10.0"
 description = "Build a knowledge graph from a markdown/HTML corpus and ship it as a static file."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,7 +8,6 @@ license = { text = "MIT" }
 authors = [{ name = "Dmitry Shirokov", email = "dmansh@gmail.com" }]
 keywords = ["knowledge-graph", "static-site", "ontology", "graph", "provenance"]
 dependencies = []
-
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -20,6 +19,12 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: HTML",
     "Typing :: Typed",
 ]
+
+[project.optional-dependencies]
+polars = ["polars>=0.20.0"]
+pyarrow = ["pyarrow>=14.0.0"]
+pandas = ["pandas>=2.0.0"]
+all = ["polars>=0.20.0", "pyarrow>=14.0.0", "pandas>=2.0.0"]
 
 [project.urls]
 Homepage = "https://shirokoff.ca/blog/build-time-knowledge-graph"

@@ -17,3 +17,5 @@ graph.json
 *.cache.json
 .cache.json
 .corpusatlas_cache.json
+tiles/
+viewer/tiles/

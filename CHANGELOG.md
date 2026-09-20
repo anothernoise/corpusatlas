@@ -4,6 +4,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.10.0] — 2026-09-20
+
+### Added
+- **Storage Engine Build Flag (`corpusatlas build --store sqlite|duckdb`)**:
+  - Adds `--store memory|sqlite|duckdb` and `--db-path` for memory-bounded out-of-core pipeline staging and deduplication.
+- **DataFrame Interoperability & Ingestion Adapter (`to_polars()`, `to_arrow()`, `to_pandas()`, `DataFrameAdapter`)**:
+  - First-class columnar dataframe exports and tabular data ingestion with zero required dependencies. Optional dependencies configured in `pyproject.toml` (`pip install corpusatlas[all]`).
+- **Model Context Protocol (MCP) Server (`corpusatlas serve-mcp`)**:
+  - Full JSON-RPC 2.0 stdio server for AI coding assistants (Claude Code, Cursor, Gemini Antigravity), exposing `search_nodes`, `extract_context_ppr`, `traverse_subgraph`, `audit_graph`, and `get_provenance`.
+- **Hybrid BM25 + PPR Search with Reciprocal Rank Fusion (`corpusatlas context --algorithm hybrid`)**:
+  - Fuses lexical keyword scoring (standard library Okapi BM25) with topological graph centrality (Personalized PageRank) via Reciprocal Rank Fusion (RRF).
+- **Hierarchical Community Clustering (`corpusatlas cluster`)**:
+  - Fast Louvain modularity maximization grouping entities into topical clusters with dominant type summaries and modularity score evaluation ($Q$).
+- **Bi-Temporal Knowledge Graph & Interactive Timeline Slider (`corpusatlas as-of`)**:
+  - Point-in-time snapshot CLI and bi-temporal intervals (`valid_from`, `valid_to`), integrated with an interactive timeline scrubber and playback controls in the web viewer.
+- **Spatial Quadtree LOD Streaming Viewer**:
+  - Viewport-bounded tile streaming in `viewer/app.js` and `viewer/index.html`, dynamically fetching multi-resolution quadtree tiles without monolithic payload downloads.
+- **Datalog-Lite Fixpoint Rule Inference (`corpusatlas.datalog`)**:
+  - Forward-chaining deductive inference engine for transitive closures, symmetric relations, inverse properties, and custom rule compositions with confidence dampening.
+- **MinHash / LSH Entity Deduplication (`corpusatlas.minhash`)**:
+  - Sub-quadratic near-duplicate entity clustering and edge repointing using character $k$-shingles, 64 universal hash permutations, and Locality Sensitive Hashing (LSH).
+- **Declarative SHACL Constraint Validator (`corpusatlas.shacl`)**:
+  - Shape validation checking node property requirements, regex matches, edge domain and range constraints, and minimum/maximum cardinality limits.
+- **Wikidata Remote Taxonomy Linker (`corpusatlas.link`)**:
+  - Online entity linking against Wikidata APIs with fallback caching, returning QIDs, labels, descriptions, and concept URLs.
+- **Incremental Watch Daemon (`corpusatlas.watch_daemon`)**:
+  - Change-detection daemon tracking filesystem mtime and hashing to auto-rebuild on file modifications.
+- **Vector Embedding & Cosine Similarity Index (`corpusatlas.vector`)**:
+  - Pure Python vector index with cosine similarity search and automatic materialization of `SIMILAR_TO` semantic edges.
+- **Automated Performance Benchmarks & Telemetry (`corpusatlas benchmark`)**:
+  - Micro-benchmark suite evaluating throughput for Barnes-Hut layout, Aho-Corasick mention scanning, and Datalog fixpoint inference (`--quick` and `--json`).
+- **Automated PyPI Publishing Workflow**:
+  - Added GitHub Actions OIDC trusted publisher release workflow in `.github/workflows/release.yml`.
+
 ## [0.9.0] — 2026-09-19
 
 ### Added
