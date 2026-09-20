@@ -437,3 +437,21 @@ def test_version_flag_is_wired_and_matches_the_package():
         else:
             raise AssertionError("--version should exit")
     assert __version__ in out.getvalue()
+ 
+ 
+def test_viewer_performance_assets_and_optimizations():
+    """Verify that viewer app.js contains the critical performance optimizations:
+    Barnes-Hut ForceAtlas2, comparison edge budgeting, idle-pausing particles,
+    and requestAnimationFrame-coalesced hover refreshes."""
+    viewer_dir = Path(__file__).resolve().parents[1] / "viewer"
+    app_js = viewer_dir / "app.js"
+    assert app_js.exists(), "viewer/app.js must exist"
+    content = app_js.read_text(encoding="utf-8")
+
+    assert "barnesHutOptimize: true" in content
+    assert "barnesHutTheta: 0.8" in content
+    assert "hasMassiveComparisons" in content
+    assert "ensureComparisonEdgesLoaded" in content
+    assert "checkParticlesState" in content
+    assert "hoverRaf = requestAnimationFrame" in content
+    assert "updateParticlesCanvasSize" in content

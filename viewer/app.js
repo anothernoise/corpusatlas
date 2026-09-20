@@ -256,11 +256,19 @@ function dedupeLabels(nodes) {
 }
 
 function loadSettings() {
+  let s = { ...DEFAULTS };
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (raw && typeof raw === 'object') return { ...DEFAULTS, ...raw };
+    if (raw && typeof raw === 'object') s = { ...s, ...raw };
   } catch (err) { /* private mode or blocked storage: defaults */ }
-  return { ...DEFAULTS };
+  if (typeof window !== 'undefined' && window.location) {
+    const q = new URLSearchParams(window.location.search);
+    if (q.has('depth')) s.depth = clamp(parseInt(q.get('depth'), 10) || s.depth, 1, 3);
+    if (q.get('orphans') === '0') s.orphans = false;
+    if (q.get('cmp') === '0') s.comparisons = false;
+    if (q.get('cmp') === '1') s.comparisons = true;
+  }
+  return s;
 }
 
 export async function initKbGraph(root) {
@@ -390,12 +398,29 @@ export async function initKbGraph(root) {
     }, 250);
   }
 
+  const allComparisonEdges = semEdges.filter((e) => e.rel === 'COMPARES_TO');
+  const hasMassiveComparisons = allComparisonEdges.length > 2000;
+  const explicitCmp1 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('cmp') === '1';
+  if (hasMassiveComparisons && !explicitCmp1) {
+    S.comparisons = false;
+  }
+  let comparisonEdgesAdded = S.comparisons;
+  if (!S.comparisons) {
+    semEdges = semEdges.filter((e) => e.rel !== 'COMPARES_TO');
+  } else if (hasMassiveComparisons) {
+    const nonCmp = semEdges.filter((e) => e.rel !== 'COMPARES_TO');
+    semEdges = [...nonCmp, ...allComparisonEdges.slice(0, 1000)];
+  }
+
   // ---- Relations filter (Filters section) --------------------------------
-  // Grouped checkboxes with a master per group. Everything starts checked:
-  // hiding a relation by default would hide data without the reader knowing.
-  const rels = [...new Set(semEdges.map((e) => e.rel))].sort();
-  const relBox = (r) =>
-    `<label class="kb-rel"><input type="checkbox" value="${r}" checked> <span>${relText(r)}</span></label>`;
+  // Grouped checkboxes with a master per group. Everything starts checked, except COMPARES_TO when disabled.
+  const relsSet = new Set(semEdges.map((e) => e.rel));
+  if (allComparisonEdges.length > 0) relsSet.add('COMPARES_TO');
+  const rels = [...relsSet].sort();
+  const relBox = (r) => {
+    const isChecked = (r === 'COMPARES_TO' ? S.comparisons : true);
+    return `<label class="kb-rel"><input type="checkbox" value="${r}" ${isChecked ? 'checked' : ''}> <span>${relText(r)}</span></label>`;
+  };
   let groups = Object.entries(data.relation_groups || {})
     .map(([name, rs]) => [name, rs.filter((r) => rels.includes(r))]).filter(([, rs]) => rs.length);
   if (groups.length === 0 && rels.length > 0) {
@@ -404,13 +429,18 @@ export async function initKbGraph(root) {
   const relGroupOf = new Map(groups.flatMap(([name, rs]) => rs.map((r) => [r, name])));
   const relColor = (rel) => REL_GROUP_COLOR[relGroupOf.get(rel)] || REL_GROUP_COLOR.Other;
   relsEl.innerHTML = groups
-    .map(([name, rs], gi) =>
-      `<div class="kb-relgroup">` +
-        `<label class="kb-rel kb-relgroup-all"><input type="checkbox" data-kb-group="${gi}" checked> <span>${esc(name)}</span></label>` +
+    .map(([name, rs], gi) => {
+      const allChecked = rs.every(r => r === 'COMPARES_TO' ? S.comparisons : true);
+      const someChecked = rs.some(r => r === 'COMPARES_TO' ? S.comparisons : true);
+      const ind = !allChecked && someChecked ? 'data-kb-indeterminate="true"' : '';
+      return `<div class="kb-relgroup">` +
+        `<label class="kb-rel kb-relgroup-all"><input type="checkbox" data-kb-group="${gi}" ${allChecked ? 'checked' : ''} ${ind}> <span>${esc(name)}</span></label>` +
         `<button type="button" class="kb-relgroup-toggle" aria-expanded="false" aria-controls="kb-relgroup-${gi}" aria-label="Show ${esc(name)} relations">${rs.length} &#9662;</button>` +
         `<div class="kb-relgroup-items" id="kb-relgroup-${gi}" data-kb-group-items="${gi}" hidden>${rs.map(relBox).join('')}</div>` +
-      `</div>`)
+      `</div>`;
+    })
     .join('');
+  relsEl.querySelectorAll('[data-kb-indeterminate="true"]').forEach(el => { el.indeterminate = true; });
   // Registered before the filter listener below, so a master checkbox has
   // already updated its children by the time the graph reads them.
   relsEl.addEventListener('change', (ev) => {
@@ -507,8 +537,18 @@ export async function initKbGraph(root) {
   const g = new Graph({ multi: true, type: 'directed' });
   const degree = new Map();
   for (const e of semEdges) {
+    if (e.rel === 'COMPARES_TO') continue;
     degree.set(e.src, (degree.get(e.src) || 0) + 1);
     degree.set(e.dst, (degree.get(e.dst) || 0) + 1);
+  }
+  for (const n of entities) {
+    if (!degree.has(n.id)) {
+      let compDeg = 0;
+      for (const e of semEdges) {
+        if (e.src === n.id || e.dst === n.id) compDeg++;
+      }
+      degree.set(n.id, compDeg);
+    }
   }
   // Deterministic curvature for COMPARES_TO: a small clique of mutually-scored
   // tools (Druid/Pinot/StarRocks/ClickHouse…) draws as N overlapping straight
@@ -559,17 +599,41 @@ export async function initKbGraph(root) {
   }
 
   semEdges.forEach((e, i) => {
-    const baseWeight = e.rel === 'COMPARES_TO' ? COMPARES_WEIGHT : 1;
+    const isCmp = e.rel === 'COMPARES_TO';
+    const baseWeight = isCmp ? (semEdges.length > 500 ? 0.02 : COMPARES_WEIGHT) : 1;
     const key = `e${i}`;
     const curv = edgeCurvatures.get(key) || 0;
     g.addEdgeWithKey(key, e.src, e.dst, {
       rel: e.rel, tier: e.prov && e.prov.tier, doc: e.prov && e.prov.doc, via: e.prov && e.prov.via,
       confidence: e.confidence, scope: e.scope, sources: e.sources || [], explanation: e.explanation,
       baseWeight, weight: baseWeight * S.link,
-      size: e.rel === 'COMPARES_TO' ? 0.6 : 1,
+      size: isCmp ? 0.5 : 1,
       curvature: curv,
     });
   });
+
+  function ensureComparisonEdgesLoaded() {
+    if (comparisonEdgesAdded || allComparisonEdges.length === 0) return;
+    comparisonEdgesAdded = true;
+    let toAdd = allComparisonEdges;
+    if (toAdd.length > 2000) {
+      toAdd = toAdd.slice(0, 1000);
+      showToast(`Showing 1,000 sampled comparisons (${allComparisonEdges.length.toLocaleString()} total)`);
+    }
+    toAdd.forEach((e, idx) => {
+      const key = `cmp_${idx}`;
+      if (!g.hasEdge(key) && g.hasNode(e.src) && g.hasNode(e.dst)) {
+        g.addEdgeWithKey(key, e.src, e.dst, {
+          rel: e.rel, tier: e.prov && e.prov.tier, doc: e.prov && e.prov.doc, via: e.prov && e.prov.via,
+          confidence: e.confidence, scope: e.scope, sources: e.sources || [], explanation: e.explanation,
+          baseWeight: 0.02, weight: 0.02 * S.link,
+          size: 0.5,
+          curvature: 0.1,
+        });
+      }
+    });
+  }
+
   // Node size blends raw degree (so a leaf with one edge is still visible)
   // with PageRank (so a concept many technologies implement outranks a
   // technology with a handful of shallow scorecard comparisons).
@@ -579,27 +643,32 @@ export async function initKbGraph(root) {
     for (const [id, v] of Object.entries(scores)) pr.set(id, v);
   } catch (err) { /* degree-only sizing below still works */ }
   const maxPr = Math.max(...pr.values(), 1e-9);
+  const isLargeGraph = g.order > 300;
+  const maxNodeSize = isLargeGraph ? 8 : 20;
+  const minNodeSize = isLargeGraph ? 2.5 : 3;
   g.forEachNode((n) => {
-    const base = 3 + 1.4 * Math.sqrt(degree.get(n) || 0);
-    const boost = maxPr > 0 ? 1 + 1.6 * Math.sqrt((pr.get(n) || 0) / maxPr) : 1;
-    g.setNodeAttribute(n, 'size', Math.min(base * boost, 20));
+    const d = degree.get(n) || 0;
+    const base = minNodeSize + (isLargeGraph ? 0.9 : 1.4) * Math.sqrt(d);
+    const boost = maxPr > 0 ? 1 + (isLargeGraph ? 0.8 : 1.6) * Math.sqrt((pr.get(n) || 0) / maxPr) : 1;
+    g.setNodeAttribute(n, 'size', Math.min(base * boost, maxNodeSize));
   });
 
   const fa2Settings = () => ({
     gravity: S.center,
     scalingRatio: S.repel,
     // Strong gravity keeps disconnected islands and orphans in orbit instead
-    // of drifting off; plain (not LinLog, not hub-dissuading) attraction is
-    // what separated this graph's scorecard cliques into distinct clusters.
-    strongGravityMode: true,
-    barnesHutOptimize: false,
+    // of drifting off, but on large graphs (> 300 nodes) it crushes clusters into balls.
+    strongGravityMode: g.order < 300,
+    barnesHutOptimize: true,
+    barnesHutTheta: 0.8,
     slowDown: 1 + Math.log(g.order),
     edgeWeightInfluence: 1,
   });
   const hasPrecomputed = entities.some((n) => typeof n.x === 'number' && typeof n.y === 'number');
   if (!hasPrecomputed) {
     try {
-      forceAtlas2.assign(g, { iterations: 400, getEdgeWeight: 'weight', settings: fa2Settings() });
+      const iters = g.order > 500 ? 60 : (g.order > 150 ? 100 : 250);
+      forceAtlas2.assign(g, { iterations: iters, getEdgeWeight: 'weight', settings: fa2Settings() });
     } catch (err) { /* seed positions are still a usable, if scattered, layout */ }
   } else {
     entities.forEach((n) => {
@@ -610,22 +679,12 @@ export async function initKbGraph(root) {
     });
   }
 
-
-
   // ForceAtlas2 on the main thread costs several milliseconds per tick on a
   // graph this size — enough to compete with Sigma's own frame budget during
   // Animate or a Forces slider drag. graphology-layout-forceatlas2 ships its
   // own worker-backed supervisor (FA2Layout) that owns graph sync internally,
   // so this is a thin, verified-before-use wrapper around it, not a second
   // implementation of the algorithm to keep correct.
-  //
-  // Verified, not assumed: constructed, started, and checked for a real tick
-  // before anything relies on it. If that fails for any reason — blocked,
-  // unsupported, a module worker Safari doesn't like — fa2WorkerAvailable
-  // stays false and every call below runs the exact main-thread rAF loop
-  // that existed before this did. Never active during a drag regardless: a
-  // dragged node needs same-frame position coupling only the main thread
-  // gives, so downNode always stops it first.
   let fa2WorkerAvailable = false, FA2LayoutCtor = null, activeFa2Worker = null;
   (async () => {
     try {
@@ -635,7 +694,17 @@ export async function initKbGraph(root) {
       await new Promise((resolve) => setTimeout(resolve, 120));
       const ok = probe.isRunning();
       try { probe.stop(); probe.kill(); } catch (err) { /* already gone */ }
-      if (ok) { FA2LayoutCtor = mod.default; fa2WorkerAvailable = true; }
+      if (ok) {
+        FA2LayoutCtor = mod.default;
+        fa2WorkerAvailable = true;
+        if (!hasPrecomputed && g.order > 80) {
+          activeFa2Worker = new FA2LayoutCtor(g, { settings: fa2Settings() });
+          activeFa2Worker.start();
+          setTimeout(() => {
+            stopWorkerSim();
+          }, 1200);
+        }
+      }
     } catch (err) { /* fa2WorkerAvailable stays false */ }
   })();
 
@@ -665,6 +734,7 @@ export async function initKbGraph(root) {
   let dragged = null, dragMoved = false, suppressClick = false;
   let maximized = false;
   let trail = [], trailIndex = -1;
+  let checkParticlesState = () => {};
 
   // Extract date metadata for temporal evolution
   const nodeDates = new Map();
@@ -1064,7 +1134,7 @@ export async function initKbGraph(root) {
     const weight = settings.labelWeight || "600";
     context.font = `${weight} ${size}px ${font}`;
 
-    const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+    const isDark = dark;
     const bgColor = isDark ? "#1e293b" : "#ffffff";
     const textColor = isDark ? "#f8fafc" : "#0f172a";
     const borderColor = isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.18)";
@@ -1163,21 +1233,40 @@ export async function initKbGraph(root) {
       if (hovered && hovered !== selected) {
         if (node === hovered) return { ...r, forceLabel: true, zIndex: 4 };
         if (hoverSet.has(node)) return { ...r, forceLabel: true, zIndex: 3 };
-        return { ...r, color: P.dim, label: '', zIndex: 0 };
+        return {
+          ...r,
+          size: Math.max(1.5, r.size * 0.45),
+          color: dark ? 'rgba(71,85,105,0.12)' : 'rgba(203,213,225,0.22)',
+          label: '',
+          zIndex: 0
+        };
       }
       if (multiSelected.size && !selected) {
         return multiSelected.has(node)
           ? { ...r, forceLabel: true, highlighted: true, zIndex: 4 }
-          : { ...r, color: P.dim, label: '', zIndex: 0 };
+          : {
+              ...r,
+              size: Math.max(1.5, r.size * 0.45),
+              color: dark ? 'rgba(71,85,105,0.12)' : 'rgba(203,213,225,0.22)',
+              label: '',
+              zIndex: 0
+            };
       }
       if (pathMode) {
         return pathNodes && pathNodes.includes(node)
           ? { ...r, forceLabel: true, highlighted: true, zIndex: 4 }
-          : { ...r, color: P.dim, label: '', zIndex: 0 };
+          : {
+              ...r,
+              size: Math.max(1.5, r.size * 0.45),
+              color: dark ? 'rgba(71,85,105,0.12)' : 'rgba(203,213,225,0.22)',
+              label: '',
+              zIndex: 0
+            };
       }
       if (!selected) {
         // In unselected overview, only prominent/hub nodes show labels to avoid overlapping clutter
-        if (a.size < 6) return { ...r, label: "" };
+        const threshold = isLargeGraph ? 4 : 6;
+        if (a.size < threshold) return { ...r, label: "" };
       }
       if (selected) {
         const d = focusDist.get(node);
@@ -1185,7 +1274,13 @@ export async function initKbGraph(root) {
         if (d === 1) return { ...r, forceLabel: focusDist.size <= 26, zIndex: 3 };
         if (d === 2) return { ...r, color: alpha(r.color, 0.6), zIndex: 2 };
         if (d === 3) return { ...r, color: alpha(r.color, 0.35), zIndex: 1 };
-        return { ...r, color: P.dim, label: '', zIndex: 0 };
+        return {
+          ...r,
+          size: Math.max(1.5, r.size * 0.45),
+          color: dark ? 'rgba(71,85,105,0.12)' : 'rgba(203,213,225,0.22)',
+          label: '',
+          zIndex: 0
+        };
       }
       return r;
     },
@@ -1625,11 +1720,31 @@ export async function initKbGraph(root) {
     stage.classList.remove('has-pin');
   }
 
+  let stageW = stage ? stage.clientWidth : 800;
+  let stageH = stage ? stage.clientHeight : 600;
+  if (typeof ResizeObserver !== 'undefined' && stage) {
+    new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        stageW = entry.contentRect.width;
+        stageH = entry.contentRect.height;
+        if (typeof updateParticlesCanvasSize === 'function') updateParticlesCanvasSize();
+      }
+    }).observe(stage);
+  } else if (typeof window !== 'undefined') {
+    window.addEventListener('resize', () => {
+      if (stage) {
+        stageW = stage.clientWidth;
+        stageH = stage.clientHeight;
+        if (typeof updateParticlesCanvasSize === 'function') updateParticlesCanvasSize();
+      }
+    });
+  }
+
   function positionFloating(el, pos) {
     el.hidden = false;
-    const w = stage.clientWidth, h = stage.clientHeight;
+    const w = stageW || 800, h = stageH || 600;
     el.style.maxHeight = `${Math.max(120, h - 16)}px`;
-    const ew = el.offsetWidth, eh = el.offsetHeight;
+    const ew = el.offsetWidth || 260, eh = el.offsetHeight || 120;
     let left = pos.x + 16, top = pos.y + 16;
     if (left + ew > w - 8) left = pos.x - ew - 16;
     if (top + eh > h - 8) top = pos.y - eh - 16;
@@ -1745,6 +1860,7 @@ export async function initKbGraph(root) {
     renderMeta();
     syncUrl();
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
     if (fly) frame([...focusDist.entries()].filter(([, d]) => d <= 1).map(([n]) => n));
   }
 
@@ -1757,6 +1873,7 @@ export async function initKbGraph(root) {
     hideCard();
     openPin(edgePinHtml(edge));
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
   }
 
   // A shift-drag lasso result: no single focus, but several nodes lit at
@@ -1781,6 +1898,7 @@ export async function initKbGraph(root) {
     renderCentre();
     renderMeta();
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
     frame(ids, 1.5);
   }
 
@@ -1798,6 +1916,7 @@ export async function initKbGraph(root) {
     renderMeta();
     syncUrl();
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
   }
 
   let pathWaypoints = [];
@@ -1865,12 +1984,14 @@ export async function initKbGraph(root) {
         `<p class="kb-pin-desc">The selected waypoints aren't connected under the current filters.</p>`
       );
       renderer.refresh({ skipIndexation: true });
+      checkParticlesState();
       return;
     }
     pathNodes = result.nodes;
     pathEdgeSet = new Set(result.edges);
     openPin(pathHtml(result));
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
     frame(pathNodes, 1.5);
   }
 
@@ -1881,6 +2002,7 @@ export async function initKbGraph(root) {
     pathEdgeSet = new Set();
     if (selected) openPin(nodePinHtml(selected)); else closePin();
     renderer.refresh({ skipIndexation: true });
+    checkParticlesState();
   }
 
 
@@ -1916,6 +2038,9 @@ export async function initKbGraph(root) {
     allowedRels = new Set([...relsEl.querySelectorAll('input:checked:not([data-kb-group])')].map((i) => i.value));
     const cmp = root.querySelector('[data-kb-set="comparisons"]');
     if (cmp) cmp.checked = S.comparisons = allowedRels.has('COMPARES_TO');
+    if (S.comparisons && typeof ensureComparisonEdgesLoaded === 'function') {
+      ensureComparisonEdgesLoaded();
+    }
     computeVisDeg();
     if (selected && !nodeVisible(selected)) { clearSelection(); } else {
       computeFocus();
@@ -2237,20 +2362,29 @@ export async function initKbGraph(root) {
   const eventPos = (event, node) => (event && Number.isFinite(event.x) ? { x: event.x, y: event.y }
     : node ? renderer.graphToViewport(g.getNodeAttributes(node)) : { x: 0, y: 0 });
 
+  let hoverRaf = 0;
   renderer.on('enterNode', ({ node, event }) => {
     if (dragged) return;
+    if (hovered === node) return;
     hovered = node;
     hoverSet = new Set(neighbours(node).map((r) => r.id));
     canvas.style.cursor = 'pointer';
-    renderer.refresh({ skipIndexation: true });
+    cancelAnimationFrame(hoverRaf);
+    hoverRaf = requestAnimationFrame(() => {
+      renderer.refresh({ skipIndexation: true });
+    });
     showNodeCard(node, eventPos(event, node));
   });
   renderer.on('leaveNode', () => {
+    if (dragged || !hovered) return;
     hovered = null;
     hoverSet = new Set();
     canvas.style.cursor = '';
     hideCard();
-    renderer.refresh({ skipIndexation: true });
+    cancelAnimationFrame(hoverRaf);
+    hoverRaf = requestAnimationFrame(() => {
+      renderer.refresh({ skipIndexation: true });
+    });
   });
   renderer.on('enterEdge', ({ edge, event }) => {
     if (dragged || hovered) return;
@@ -2633,6 +2767,10 @@ export async function initKbGraph(root) {
     if (q.has('depth')) S.depth = clamp(parseInt(q.get('depth'), 10) || S.depth, 1, 3);
     if (q.get('orphans') === '0') S.orphans = false;
     if (q.get('cmp') === '0') S.comparisons = false;
+    if (q.get('cmp') === '1') {
+      S.comparisons = true;
+      if (typeof ensureComparisonEdgesLoaded === 'function') ensureComparisonEdgesLoaded();
+    }
     if (q.has('hideRel')) q.get('hideRel').split(',').forEach((r) => setRel(r, false));
     if (q.has('hideType')) {
       q.get('hideType').split(',').forEach((t) => {
@@ -2759,12 +2897,23 @@ export async function initKbGraph(root) {
   // ---- Flow Particles Animation Loop ----
   const particlesCanvas = root.querySelector('[data-kb-particles]');
   let particleOffset = 0;
+  let particleRaf = 0;
+  let particlesRunning = false;
+
+  function updateParticlesCanvasSize() {
+    if (!particlesCanvas || !stage) return;
+    const targetW = stageW || stage.clientWidth || 800;
+    const targetH = stageH || stage.clientHeight || 600;
+    if (particlesCanvas.width !== targetW || particlesCanvas.height !== targetH) {
+      particlesCanvas.width = targetW;
+      particlesCanvas.height = targetH;
+    }
+  }
+
   function renderParticles() {
+    if (!particlesRunning) return;
     if (particlesCanvas && stage) {
-      if (particlesCanvas.width !== stage.clientWidth || particlesCanvas.height !== stage.clientHeight) {
-        particlesCanvas.width = stage.clientWidth;
-        particlesCanvas.height = stage.clientHeight;
-      }
+      updateParticlesCanvasSize();
       const ctx = particlesCanvas.getContext('2d');
       ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
 
@@ -2796,11 +2945,29 @@ export async function initKbGraph(root) {
           ctx.arc(px, py, 2.8, 0, Math.PI * 2);
           ctx.fill();
         }
+        particleRaf = requestAnimationFrame(renderParticles);
+      } else {
+        particlesRunning = false;
+        ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
       }
     }
-    requestAnimationFrame(renderParticles);
   }
-  requestAnimationFrame(renderParticles);
+
+  checkParticlesState = () => {
+    const hasParticles = (pathMode && pathEdgeSet && pathEdgeSet.size > 0) || !!selected;
+    if (hasParticles && !particlesRunning) {
+      particlesRunning = true;
+      cancelAnimationFrame(particleRaf);
+      particleRaf = requestAnimationFrame(renderParticles);
+    } else if (!hasParticles && particlesRunning) {
+      particlesRunning = false;
+      cancelAnimationFrame(particleRaf);
+      if (particlesCanvas) {
+        const ctx = particlesCanvas.getContext('2d');
+        ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
+      }
+    }
+  };
 
   drawMinimap();
 
