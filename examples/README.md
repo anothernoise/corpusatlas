@@ -150,3 +150,130 @@ Run migration:
 ```bash
 corpusatlas migrate --graph graph.json --migration migration.toml --out migrated.json
 ```
+
+---
+
+## 7. Columnar DataFrame Interoperability & Ingestion
+
+Load graphs into Polars, Apache Arrow, or Pandas without intermediate file conversions:
+
+```python
+import corpusatlas as ca
+
+# Load from disk
+graph_data = ca.load_graph("viewer/graph.json")
+
+# Zero required dependencies - dict records:
+nodes_dict, edges_dict = ca.dataframe.to_dict_records(graph_data.nodes, graph_data.edges)
+
+# High-performance columnar dataframes (requires pip install "corpusatlas[all]")
+nodes_pl, edges_pl = graph_data.to_polars()
+nodes_pa, edges_pa = graph_data.to_arrow()
+nodes_df, edges_df = graph_data.to_pandas()
+
+# Filter or aggregate relationships with Polars
+tech_implementations = edges_pl.filter(edges_pl["rel"] == "IMPLEMENTS")
+print(tech_implementations.head())
+```
+
+Ingest tabular data directly into the pipeline via `DataFrameAdapter`:
+
+```python
+from corpusatlas.adapters.dataframe import DataFrameAdapter
+
+adapter = DataFrameAdapter(
+    nodes_data=[{"id": "doc:1", "type": "Document", "label": "Pipeline Guide"}],
+    edges_data=[{"src": "doc:1", "rel": "ABOUT", "dst": "topic:etl"}],
+)
+docs = list(adapter.documents())
+```
+
+---
+
+## 8. Model Context Protocol (MCP) Server for AI Assistants
+
+Expose your knowledge graph to AI coding assistants (Claude Desktop, Cursor, Gemini Antigravity) over standard I/O:
+
+```bash
+corpusatlas serve-mcp --graph viewer/graph.json
+```
+
+Add to Claude Desktop config (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "corpusatlas": {
+      "command": "corpusatlas",
+      "args": ["serve-mcp", "--graph", "/path/to/graph.json"]
+    }
+  }
+}
+```
+
+Exposes tools:
+- `search_nodes`: Search nodes by text query and type filter.
+- `extract_context_ppr`: Ego-network extraction with Personalized PageRank.
+- `traverse_subgraph`: Breadth-first graph expansion up to depth $N$.
+- `audit_graph`: Graph topology health and bridge edge detection.
+- `get_provenance`: Claim provenance and confidence audit trail.
+
+---
+
+## 9. Hybrid BM25 + PPR Search with Reciprocal Rank Fusion
+
+Combine Okapi BM25 keyword relevance with Personalized PageRank topological centrality:
+
+```bash
+corpusatlas context --graph viewer/graph.json --entity "Apache Spark" --algorithm hybrid --top-k 15
+```
+
+Ranks candidate nodes using Reciprocal Rank Fusion ($k=60$):
+$$\text{RRF}(d) = \frac{1}{60 + r_{\text{BM25}}(d)} + \frac{1}{60 + r_{\text{PPR}}(d)}$$
+
+---
+
+## 10. Hierarchical Community Detection (Louvain Modularity)
+
+Group entities into topical communities by maximizing modularity ($Q$):
+
+```bash
+corpusatlas cluster --graph viewer/graph.json --resolution 1.0 --out viewer/clustered.json
+```
+
+Outputs clusters with dominant entity types and Louvain modularity score.
+
+---
+
+## 11. Bi-Temporal Historical Snapshots (`corpusatlas as-of`)
+
+Filter knowledge graph to point-in-time states using temporal valid-time intervals:
+
+```bash
+corpusatlas as-of --graph viewer/graph.json --date "2024-01-01" --out snapshot_2024.json
+```
+
+The web viewer (`viewer/index.html`) includes an interactive timeline slider allowing visual inspection of graph state at any historical moment.
+
+---
+
+## 12. Datalog-Lite Rule Inference Engine
+
+Deduce implicit transitive, symmetric, or composed relationships using pure Python forward-chaining fixpoint evaluation:
+
+```python
+from corpusatlas.datalog import DatalogEngine, Rule
+from corpusatlas.model import Edge
+
+edges = [
+    Edge(src="entity:a", rel="PART_OF", dst="entity:b"),
+    Edge(src="entity:b", rel="PART_OF", dst="entity:c"),
+]
+
+engine = DatalogEngine(rules=[
+    Rule(head_rel="PART_OF", body_rels=("PART_OF", "PART_OF"), confidence_factor=0.9)
+])
+
+inferred_edges = engine.evaluate(edges)
+# Inferred: entity:a -PART_OF-> entity:c (confidence: 0.9)
+```
+

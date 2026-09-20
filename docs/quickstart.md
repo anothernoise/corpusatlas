@@ -7,7 +7,9 @@ empty directory.
 ## 1. Install
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.9.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.10.0
+# Or with optional high-performance tabular engines:
+pip install "corpusatlas[all]"
 ```
 
 No third-party dependencies, so this is the whole install.
@@ -88,10 +90,30 @@ including [shirokoff.ca's own](https://shirokoff.ca/knowledge-base/graph.json):
 `viewer.html?graph=https://shirokoff.ca/knowledge-base/graph.json`.
 
 ## 6. Advanced Discovery, Graph RAG, Analytics & Export
-
-- **Graph RAG Context Extraction (Personalized PageRank)**: Extract a focused semantic subgraph using random walks with restart for LLM prompt augmentation:
+ 
+- **Model Context Protocol (MCP) Server**: Expose the knowledge graph directly to AI coding assistants (Claude Desktop, Cursor, Gemini Antigravity) via JSON-RPC 2.0 over standard I/O:
   ```bash
-  corpusatlas context --graph graph.json --entity spark --algorithm ppr --top-k 20 --format markdown
+  corpusatlas serve-mcp --graph graph.json
+  ```
+- **Hybrid BM25 + PPR Context Retrieval**: Combine lexical keyword relevance (Okapi BM25) and topological centrality (Personalized PageRank) via Reciprocal Rank Fusion:
+  ```bash
+  corpusatlas context --graph graph.json --entity spark --algorithm hybrid --top-k 20 --format markdown
+  ```
+- **Hierarchical Community Clustering**: Group nodes into topical clusters maximizing Louvain modularity ($Q$):
+  ```bash
+  corpusatlas cluster --graph graph.json --out clustered.json
+  ```
+- **Bi-Temporal Historical Snapshots**: Query point-in-time graph states or scrub timeline intervals:
+  ```bash
+  corpusatlas as-of --graph graph.json --date "2024-01-01" --out snapshot_2024.json
+  ```
+- **Out-of-Core Staging Engines**: Stage and deduplicate large corpora in SQLite or DuckDB:
+  ```bash
+  corpusatlas build --config corpusatlas.toml --out graph.json --store sqlite --db-path staging.db
+  ```
+- **Performance Telemetry Micro-Benchmarks**: Measure engine throughput across layout, scanning, and Datalog fixpoints:
+  ```bash
+  corpusatlas benchmark --quick
   ```
 - **Knowledge Graph Quality & Topological Audit**: Inspect graph health, Gini network concentration, bridge bottlenecks, cycle anomalies, and contradictory claims:
   ```bash
@@ -118,10 +140,6 @@ including [shirokoff.ca's own](https://shirokoff.ca/knowledge-base/graph.json):
 - **Zero-Config Static Publishing**: Bundle viewer HTML, CSS, JS and `graph.json` into a deployable distribution directory:
   ```bash
   corpusatlas publish --graph graph.json --out-dir dist/
-  ```
-- **Co-Occurrence Edge Inference**: Automatically infer latent relationships between entities sharing document citations:
-  ```bash
-  corpusatlas infer --graph graph.json --threshold 0.4 --out inferred.json
   ```
 - **Live File Watcher**: Auto-rebuild on any document or configuration edit:
   ```bash

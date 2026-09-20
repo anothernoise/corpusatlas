@@ -22,15 +22,16 @@ Two rules keep this a module rather than a framework:
 
 1. **Sources are adapters.** Every adapter yields the same `Document` shape.
    The core never learns the name of your blog, your book, or your CMS. Ships
-   with seven: a directory of rendered HTML (`html_blog`), an Obsidian vault
+   with eight: a directory of rendered HTML (`html_blog`), an Obsidian vault
    (`obsidian`) or a Logseq graph (`logseq`) — `[[wikilinks]]` become
    `REFERENCES` edges with zero adapter-specific glue either way, since the
    deterministic tier already knows what to do with a link — the Architecture
-   Radar's scorecards and dated entries, curated entity packs, and a plain
-   list of URLs (`web`) for a corpus that isn't a local checkout at all — see
+   Radar's scorecards and dated entries, curated entity packs, a plain
+   list of URLs (`web`) for a corpus that isn't a local checkout at all, and
+   tabular DataFrames / Arrow / dicts (`dataframe`) — see
    `corpusatlas/adapters/` for what each one honestly does and doesn't
    extract. A new source is a class with one `documents()` method; the
-   existing seven are the reference for the shape — copy one, or ship yours
+   existing eight are the reference for the shape — copy one, or ship yours
    as a separate installed package via the `corpusatlas.adapters` entry-point
    group (see [docs/adapters.md](docs/adapters.md)) without forking this repo
    — [`examples/plugin-rss-adapter/`](examples/plugin-rss-adapter/) is a real,
@@ -47,7 +48,9 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.9.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.10.0
+# Or with optional high-performance columnar extras:
+pip install "corpusatlas[all]"
 
 corpusatlas init --dir my-corpus    # a starter config + entity registry
 # edit my-corpus/corpusatlas.toml to point `path` at your notes, then:
@@ -383,6 +386,49 @@ corpusatlas export --graph graph.json --format turtle --out graph.ttl
 
 When DuckDB CLI is installed on the host system, `export --format duckdb` automatically invokes DuckDB to build native `.duckdb` and `.parquet` files directly without requiring any third-party Python pip dependencies!
 
+### 10. Datalog-Lite Fixpoint Rule Inference
+Deduce implicit transitive, symmetric, or custom relational rules using forward-chaining fixpoint evaluation:
+```python
+from corpusatlas.datalog import DatalogEngine, Rule
+engine = DatalogEngine(rules=[
+    Rule(head_rel="PART_OF", body_rels=("PART_OF", "PART_OF"), confidence_factor=0.9)
+])
+inferred_edges = engine.evaluate(edges)
+```
+
+### 11. Sub-Quadratic MinHash / LSH Deduplication
+Cluster and deduplicate near-identical entities using character $k$-shingles, 64 universal hash permutations, and Locality-Sensitive Hashing (LSH) without $O(N^2)$ all-pairs comparisons:
+```python
+from corpusatlas.minhash import MinHashLSH
+lsh = MinHashLSH(threshold=0.8)
+clusters = lsh.cluster_entities(nodes)
+```
+
+### 12. Declarative SHACL Shape Validation
+Enforce domain/range constraints, required properties, regex patterns, and cardinality bounds on knowledge graphs:
+```python
+from corpusatlas.shacl import SHACLValidator
+validator = SHACLValidator.from_toml("shapes.toml")
+results = validator.validate(nodes, edges)
+```
+
+### 13. Remote Wikidata Taxonomy Linker
+Resolve local entity nodes to Wikidata QIDs, concept descriptions, and Wikipedia links with offline fallback caching:
+```python
+from corpusatlas.link import link_entity_to_wikidata
+link_info = link_entity_to_wikidata("Apache Spark")
+# {'qid': 'Q3011409', 'label': 'Apache Spark', 'url': 'https://www.wikidata.org/wiki/Q3011409', ...}
+```
+
+### 14. Vector Embedding & Cosine Similarity Index
+Pure Python embedding vector store with nearest neighbor search and semantic similarity edge materialization (`SIMILAR_TO`):
+```python
+from corpusatlas.vector import VectorIndex
+vindex = VectorIndex()
+vindex.add("entity:spark", [0.12, 0.85, ...])
+similar = vindex.nearest_neighbors("entity:spark", top_k=5)
+```
+
 ## Other formats
 
 `graph.json` stays the artifact `build` writes — it's what the browser reads
@@ -446,7 +492,7 @@ It grew inside that site's repository and was split out with
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). [CHANGELOG.md](CHANGELOG.md) has the
-version history; [docs/adapters.md](docs/adapters.md) lists all seven sources
+version history; [docs/adapters.md](docs/adapters.md) lists all eight sources
 side by side.
 
 ## Licence

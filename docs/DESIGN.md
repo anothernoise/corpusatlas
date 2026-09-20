@@ -19,6 +19,7 @@ flowchart LR
         S3["Architecture Radar & Scorecards"]
         S4["Curated Entity Packs"]
         S5["Web Pages (URLs)"]
+        S6["Tabular DataFrames / Arrow / Dicts"]
     end
 
     Sources --> Adapters["Adapters (concurrency + cache)"]
@@ -298,9 +299,10 @@ Three different things get asked about under "flexibility," and they have
 different answers:
 
 - **Sources.** Fully pluggable — this is the actual extension point. An
-  adapter is a class with one `documents()` method; five ship as the
-  reference (`html_blog`, `radar_scorecards`, `radar_entries`, `entity_packs`,
-  `web`). Adding a sixth never touches the core.
+  adapter is a class with one `documents()` method; eight ship built-in
+  (`html_blog`, `obsidian`, `logseq`, `web`, `entity_packs`, `radar_scorecards`,
+  `radar_entries`, `dataframe`). Adding a ninth via the entry point group never
+  touches the core.
 - **Config.** Already flexible: everything in a `[[sources]]` block is
   adapter-specific keyword arguments, and paths resolve relative to the
   config file, not the install location.

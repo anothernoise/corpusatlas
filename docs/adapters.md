@@ -2,7 +2,7 @@
 
 Every adapter is a class with one `documents()` method yielding `Document`s
 (`model.py`) — the core never learns anything about a source beyond that
-shape. This is the seven that ship, side by side; each one's own module
+shape. This is the eight that ship, side by side; each one's own module
 docstring has the full story, including what it honestly doesn't handle.
 
 | `type` | Class | Reads | Config keys |
@@ -11,6 +11,7 @@ docstring has the full story, including what it honestly doesn't handle.
 | `obsidian` | `ObsidianAdapter` | A directory of markdown notes — an Obsidian vault, or just plain markdown | `path`, `url_base` (default `/vault/`), `recursive` (default `true`) |
 | `logseq` | `LogseqAdapter` | A Logseq graph — outline markdown, `key:: value` page properties | `path`, `url_base` (default `/notes/`), `recursive` (default `true`) |
 | `web` | `WebAdapter` | A plain list of URLs, fetched at build time | `urls` (a list) and/or `url_list_file` (one URL per line); `timeout` (default `10.0`); `user_agent` |
+| `dataframe` | `DataFrameAdapter` | Tabular data (Polars, Pandas, PyArrow, or list of dicts) | `nodes_data`, `edges_data`, `source_name` (default `"dataframe"`) |
 | `entity_packs` | `EntityPacksAdapter` | A directory of curated entity-pack JSON files | `path`, `url_base` (default `""`) |
 | `radar_scorecards` | `RadarScorecardsAdapter` | One JSON file: scored comparisons | `path` |
 | `radar_entries` | `RadarEntriesAdapter` | One JSON file: dated ring calls | `path`, `doc_prefixes` (optional; overrides the id-prefix mapping) |
@@ -37,6 +38,10 @@ docstring has the full story, including what it honestly doesn't handle.
   reproducible as the pages it fetches.
 - **Hand-curated structured claims about entities?** `entity_packs` — the
   curated tier's own format, described in `README.md`'s "Extraction tiers".
+- **Tabular DataFrames or SQL query results?** `dataframe` — accepts Polars
+  DataFrames, Pandas DataFrames, PyArrow Tables, or iterables of dicts. Yields
+  nodes and edges as typed documents and claims directly, without needing to
+  serialize intermediate CSVs or JSON files.
 - **Scored comparisons or a dated call log, in this project's own
   Architecture-Radar-shaped JSON?** `radar_scorecards` / `radar_entries` —
   the two most site-specific adapters here; useful as a reference for
@@ -45,7 +50,7 @@ docstring has the full story, including what it honestly doesn't handle.
 
 ## Writing a new one
 
-Copy whichever of the seven is closest in shape. The contract is exactly:
+Copy whichever of the eight is closest in shape. The contract is exactly:
 accept whatever config keys you need in `__init__`, and yield `Document`s
 from `documents()` — `id`, `title`, `url`, `kind` (almost always `"article"`
 unless you're doing something `radar_entries`-shaped), and whatever of
@@ -69,7 +74,7 @@ notion = "corpusatlas_notion.adapter:NotionAdapter"
 
 Once that package is installed alongside corpusatlas, `[[sources]] type =
 "notion"` in a config resolves it exactly like `html_blog` resolves — no
-change to corpusatlas itself. The seven built-in names can never be shadowed
+change to corpusatlas itself. The eight built-in names can never be shadowed
 this way: `REGISTRY` is checked before any entry point, so a plugin claiming
 `type = "html_blog"` is simply ignored in favour of the real one. An unknown
 `type` reports every name it looked for, built-in and external, in the same
