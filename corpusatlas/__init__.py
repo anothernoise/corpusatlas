@@ -9,7 +9,7 @@ from .dataframe import (
 )
 from .model import Document, Edge, Node
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 
 __all__ = [
     "__version__",
