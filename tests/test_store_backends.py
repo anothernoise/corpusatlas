@@ -63,7 +63,7 @@ name = "test"
 
 [[sources]]
 type = "obsidian"
-path = "{notes_dir}"
+path = "{notes_dir.as_posix()}"
 """, encoding="utf-8")
 
         out_mem = root / "graph_mem.json"

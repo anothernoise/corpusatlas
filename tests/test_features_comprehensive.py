@@ -228,7 +228,7 @@ def test_build_with_layout():
 
         cfg = Path(d) / "corpusatlas.toml"
         cfg.write_text(f"""
-sources = [{{ type = "obsidian", path = "{corpus}" }}]
+sources = [{{ type = "obsidian", path = "{corpus.as_posix()}" }}]
 """, encoding="utf-8")
 
         out = Path(d) / "graph.json"
