@@ -44,7 +44,7 @@ export function buildContext(data, byId, entityTypes) {
   return context;
 }
 
-const TIER_TITLE = {
+export const TIER_TITLE = {
   extracted: 'A word-boundary match of this entity\'s name in the article text, not a tag a person set',
   curated: 'From an entity pack: model-drafted, every link machine-checked',
 };

@@ -468,7 +468,7 @@ def test_viewer_modular_js_architecture():
         "constants.js": ["TYPE_COLOR", "getTypeColor", "DEFAULTS", "MINIMAP_SIZE"],
         "utils.js": ["esc", "relText", "fmtDate", "clamp", "hashSeed", "loadSettings"],
         "algorithms.js": ["bfsDist", "shortestPath", "computeMultiPath", "computeCommunitiesFallback", "computeCentrality"],
-        "context.js": ["buildContext", "tierChip", "contextHtml", "nodePinHtml", "edgePinHtml", "pathHtml"],
+        "context.js": ["buildContext", "TIER_TITLE", "tierChip", "contextHtml", "nodePinHtml", "edgePinHtml", "pathHtml"],
         "layouts.js": ["fa2Settings", "computeLayoutPositions", "switchLayout"],
         "particles.js": ["createParticleController"],
         "minimap.js": ["createMinimapController"],
