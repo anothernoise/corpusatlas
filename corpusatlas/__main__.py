@@ -737,6 +737,51 @@ def cmd_serve_api(args) -> int:
     return 0
 
 
+def cmd_rag(args) -> int:
+    """Extracts k-hop subgraph context around query entities for LLM prompting."""
+    from .rag import extract_rag_context
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    res = extract_rag_context(
+        g,
+        query=args.query,
+        k_hops=int(getattr(args, "k_hops", 2)),
+        token_budget=int(getattr(args, "token_budget", 2000)),
+        format=getattr(args, "format", "markdown"),
+    )
+    if getattr(args, "format", "markdown") == "json":
+        print(json.dumps(res, indent=2))
+    else:
+        print(res["prompt_text"])
+    return 0
+
+
+def cmd_query(args) -> int:
+    """Answers natural language graph queries."""
+    from .nl_query import execute_nl_query
+
+    g = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    ask_query = getattr(args, "ask", None)
+    if not ask_query:
+        print("query needs --ask \"question\"", file=sys.stderr)
+        return 1
+    res = execute_nl_query(g, ask_query)
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+    else:
+        print(f"Intent: {res['matched_intent']}")
+        print(f"Summary: {res['summary']}\n")
+        if "path" in res:
+            print("Path: " + " -> ".join(n["label"] for n in res["path"]))
+        elif res.get("results"):
+            for r in res["results"][:15]:
+                if "label" in r:
+                    print(f"  - {r.get('label')} ({r.get('type', 'Unknown')})")
+                elif "rel" in r:
+                    print(f"  - {r.get('source')} --[{r.get('rel')}]--> {r.get('target')}")
+    return 0
+
+
 def cmd_benchmark(args) -> int:
     """Runs micro-benchmarks across core graph algorithms and reports performance telemetry."""
     from .benchmark import run_all_benchmarks
@@ -987,6 +1032,20 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--resolution", type=float, default=1.0, help="modularity resolution parameter (default: 1.0)")
     cl.add_argument("--out", help="output path to write graph with community annotations")
     cl.set_defaults(fn=cmd_cluster)
+
+    rag_parser = sub.add_parser("rag", help="extract k-hop subgraph context for LLM prompt injection")
+    rag_parser.add_argument("--graph", required=True, help="path to graph.json")
+    rag_parser.add_argument("--query", required=True, help="query keywords or entity terms")
+    rag_parser.add_argument("--k-hops", type=int, default=2, help="k-hop expansion radius (default: 2)")
+    rag_parser.add_argument("--token-budget", type=int, default=2000, help="max token budget (default: 2000)")
+    rag_parser.add_argument("--format", choices=["markdown", "json"], default="markdown", help="output format (default: markdown)")
+    rag_parser.set_defaults(fn=cmd_rag)
+
+    query_parser = sub.add_parser("query", help="natural language query engine for knowledge graph")
+    query_parser.add_argument("--graph", required=True, help="path to graph.json")
+    query_parser.add_argument("--ask", required=True, help="natural language question")
+    query_parser.add_argument("--json", action="store_true", help="output structured JSON response")
+    query_parser.set_defaults(fn=cmd_query)
 
     bm = sub.add_parser("benchmark", help="run performance micro-benchmarks and report telemetry")
     bm.add_argument("--quick", action="store_true", help="run faster benchmark with smaller graph")
