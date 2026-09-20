@@ -19,3 +19,4 @@ graph.json
 .corpusatlas_cache.json
 tiles/
 viewer/tiles/
+uv.lock

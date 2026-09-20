@@ -12,6 +12,9 @@ docstring has the full story, including what it honestly doesn't handle.
 | `logseq` | `LogseqAdapter` | A Logseq graph — outline markdown, `key:: value` page properties | `path`, `url_base` (default `/notes/`), `recursive` (default `true`) |
 | `web` | `WebAdapter` | A plain list of URLs, fetched at build time | `urls` (a list) and/or `url_list_file` (one URL per line); `timeout` (default `10.0`); `user_agent` |
 | `dataframe` | `DataFrameAdapter` | Tabular data (Polars, Pandas, PyArrow, or list of dicts) | `nodes_data`, `edges_data`, `source_name` (default `"dataframe"`) |
+| `github` | `GitHubAdapter` | GitHub issues, pull requests, and discussions export JSON | `path`, `repo` (default `"github/repo"`) |
+| `notion` | `NotionAdapter` | Notion workspace Markdown and block export directories | `path`, `workspace` (default `"notion"`) |
+| `confluence` | `ConfluenceAdapter` | Confluence space HTML and Markdown export trees | `path`, `space_key` (default `"GLOBAL"`) |
 | `entity_packs` | `EntityPacksAdapter` | A directory of curated entity-pack JSON files | `path`, `url_base` (default `""`) |
 | `radar_scorecards` | `RadarScorecardsAdapter` | One JSON file: scored comparisons | `path` |
 | `radar_entries` | `RadarEntriesAdapter` | One JSON file: dated ring calls | `path`, `doc_prefixes` (optional; overrides the id-prefix mapping) |
@@ -42,6 +45,13 @@ docstring has the full story, including what it honestly doesn't handle.
   DataFrames, Pandas DataFrames, PyArrow Tables, or iterables of dicts. Yields
   nodes and edges as typed documents and claims directly, without needing to
   serialize intermediate CSVs or JSON files.
+- **GitHub issues, pull requests, and discussions?** `github` — ingests
+  issue/PR exports into documents, extracting labels into tags, author metadata,
+  states, timestamps, and issue cross-references (`#123`).
+- **A Notion workspace or database?** `notion` — parses Notion export trees,
+  extracting YAML frontmatter, headers, tags, relations, and markdown text.
+- **A Confluence space export?** `confluence` — processes Confluence HTML/Markdown
+  space dumps, stripping formatting tags while preserving text and hierarchy.
 - **Scored comparisons or a dated call log, in this project's own
   Architecture-Radar-shaped JSON?** `radar_scorecards` / `radar_entries` —
   the two most site-specific adapters here; useful as a reference for
@@ -50,7 +60,7 @@ docstring has the full story, including what it honestly doesn't handle.
 
 ## Writing a new one
 
-Copy whichever of the eight is closest in shape. The contract is exactly:
+Copy whichever of the eleven is closest in shape. The contract is exactly:
 accept whatever config keys you need in `__init__`, and yield `Document`s
 from `documents()` — `id`, `title`, `url`, `kind` (almost always `"article"`
 unless you're doing something `radar_entries`-shaped), and whatever of

@@ -4,6 +4,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.11.0] — 2026-09-20
+
+### Added
+- **GraphRAG Subgraph Context Extractor (`corpusatlas rag`)**:
+  - Extracts $k$-hop subgraphs around query keywords or seed entities, bounded by an exact token budget, formatted for immediate LLM prompt injection (`--token-budget`, `--format markdown|json`).
+- **Natural Language Graph Query (`corpusatlas query --ask`)**:
+  - Translates natural language questions into graph traversals, shortest paths, comparisons, dependencies, and hub rankings.
+- **In-Memory W3C SPARQL 1.1 Query Engine (`corpusatlas sparql`)**:
+  - Standard SPARQL pattern matching (`SELECT ?var WHERE { ... }`) over entities, RDF types (`a`), and relationship predicates with zero external runtime dependencies.
+- **Graph Topology & Health Analytics (`corpusatlas analyze`)**:
+  - Computes network density, clustering, Hopcroft-Tarjan articulation points (single points of failure / SPOF), orphan counts, and composite graph health score (0–100).
+- **Declarative Architecture Linter (`corpusatlas lint`)**:
+  - Enforces cross-tier forbidden edges (e.g. Application $\to$ Database), required metadata attributes, acyclic relation constraints, and god-component degree thresholds in CI/CD (exits with code 1 on violations).
+- **Enterprise Ingestion Adapters (GitHub, Notion, Confluence)**:
+  - `GitHubAdapter` (`type = "github"`): Ingests repository issues, PRs, comments, labels, and references (`#123`).
+  - `NotionAdapter` (`type = "notion"`): Ingests Notion export directories, extracting YAML frontmatter, headers, tags, and document links.
+  - `ConfluenceAdapter` (`type = "confluence"`): Ingests Confluence spaces and HTML/Markdown export trees.
+- **Interactive Web Viewer Enhancements**:
+  - Full-text fuzzy search & typeahead scoring with typo tolerance and prefix ranking (`viewer/js/search.js`).
+  - Subgraph vector and interchange exports: scalable SVG, high-res PNG, Gephi GEXF 1.2 XML, and GraphML XML (`viewer/js/export.js`).
+  - Temporal evolution player with animated playback and date scrubbing (`viewer/js/timeline.js`).
+  - 3D Force-Directed Graph WebGL mode toggle (`viewer/js/view3d.js`).
+  - Modularized zero-build ES module architecture under `viewer/js/`.
+
 ## [0.10.0] — 2026-09-20
 
 ### Added

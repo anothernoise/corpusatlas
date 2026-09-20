@@ -25,20 +25,15 @@ Two rules keep this a module rather than a framework:
 
 1. **Sources are adapters.** Every adapter yields the same `Document` shape.
    The core never learns the name of your blog, your book, or your CMS. Ships
-   with eight: a directory of rendered HTML (`html_blog`), an Obsidian vault
-   (`obsidian`) or a Logseq graph (`logseq`) — `[[wikilinks]]` become
-   `REFERENCES` edges with zero adapter-specific glue either way, since the
-   deterministic tier already knows what to do with a link — the Architecture
-   Radar's scorecards and dated entries, curated entity packs, a plain
-   list of URLs (`web`) for a corpus that isn't a local checkout at all, and
-   tabular DataFrames / Arrow / dicts (`dataframe`) — see
-   `corpusatlas/adapters/` for what each one honestly does and doesn't
-   extract. A new source is a class with one `documents()` method; the
-   existing eight are the reference for the shape — copy one, or ship yours
-   as a separate installed package via the `corpusatlas.adapters` entry-point
-   group (see [docs/adapters.md](docs/adapters.md)) without forking this repo
-   — [`examples/plugin-rss-adapter/`](examples/plugin-rss-adapter/) is a real,
-   working one of those, not just a snippet.
+   with eleven built-in adapters: markdown notes (`obsidian`, `logseq`), rendered
+   HTML (`html_blog`), Notion workspaces (`notion`), Confluence spaces
+   (`confluence`), GitHub issues & PRs (`github`), tabular DataFrames / Arrow /
+   dicts (`dataframe`), curated entity packs (`entity_packs`), Architecture Radar
+   scorecards and entries (`radar_scorecards`, `radar_entries`), and a list of
+   URLs (`web`). See `corpusatlas/adapters/` and [docs/adapters.md](docs/adapters.md)
+   for what each one handles. A new source is a class with one `documents()`
+   method; you can copy one or ship yours as an external package via the
+   `corpusatlas.adapters` entry-point group without forking this repo.
 2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 
@@ -51,7 +46,7 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.10.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.11.0
 # Or with optional high-performance columnar extras:
 pip install "corpusatlas[all]"
 
@@ -229,23 +224,23 @@ Every edge carries where it came from:
 An edge is a claim made *by* a document. When the document goes, the claim goes
 with it — `merge.py` handles retraction, not just append.
 
-## Looking at the output
+## Interactive Web Viewer
 
-`viewer/index.html` is a ~150-line reference renderer, not a library: one
-static ForceAtlas2 layout, type-coloured nodes, click a node to see its
-neighbours. No live simulation, no drag, no URL routing — the production
-renderer this was pulled from is ~1900 lines for exactly those, tuned for one
-specific graph's shape rather than written to be generic. Point it at any
-`graph.json` this module built and it will render — it reads only the fields
-`emit.py` documents (`entity_types`, `nodes[].type`, `.degree`, `.url`), never
-this ontology's specific type names.
+`viewer/index.html` provides a zero-build, dependency-free interactive WebGL knowledge graph viewer designed for exploratory analysis and documentation embeds:
+
+- **Full-Text Fuzzy Search & Typeahead**: Subsequence fuzzy matching with typo tolerance, prefix boosts, and word-boundary ranking across entities, descriptions, and aliases.
+- **3D Force-Directed Graph Mode**: Seamlessly switch between 2D canvas and 3D WebGL force-directed space for complex topology exploration.
+- **Vector & Subgraph Export**: One-click export to scalable vector graphics (**SVG**), high-res **PNG**, **Gephi GEXF 1.2 XML**, **GraphML XML**, and filtered JSON subgraphs.
+- **Temporal Graph Evolution Player**: Time-travel scrubber animating graph growth and entity arrivals across historical dates and snapshots.
+- **Topological Clusters & Centrality Insights**: Community overlays (Louvain modularity) and on-demand hub rankings (Degree, PageRank, Betweenness).
+- **Smooth Navigation & Minimap**: Camera history (back/forward), calibrated minimap with pan tracking, and directional particle flow animations.
 
 ![The reference viewer showing shirokoff.ca's 214-entity graph, type-coloured, with Apache Spark focused and its neighbours listed on the right](docs/images/viewer-screenshot.jpg)
 
 ```bash
 corpusatlas build --config your-corpus.toml --out viewer/graph.json
-python3 -m http.server 8000    # from wherever viewer/ and graph.json both are
-# open http://localhost:8000/viewer/
+python3 -m http.server 8000 --directory viewer
+# open http://localhost:8000/
 ```
 
 (`example.toml`'s paths point at a real corpus's directories, so it won't
@@ -310,7 +305,44 @@ docs = list(adapter.documents())
 
 Beyond building static graphs, CorpusAtlas provides a comprehensive zero-dependency backend toolkit:
 
-### 1. Model Context Protocol (MCP) Server (`serve-mcp`)
+### 1. GraphRAG Subgraph Context Extractor (`rag`)
+Extract $k$-hop subgraphs around query keywords or entities, bounded by a target LLM token budget, formatted for immediate prompt injection:
+```bash
+# Markdown prompt context for LLMs (default):
+corpusatlas rag --graph graph.json --query "Apache Spark" --k-hops 2 --token-budget 2000
+
+# JSON structured context:
+corpusatlas rag --graph graph.json --query "Spark" --format json
+```
+
+### 2. Natural Language Graph Query (`query --ask`)
+Translate plain-English questions into graph traversals, shortest paths, comparisons, dependencies, and hub rankings:
+```bash
+corpusatlas query --graph graph.json --ask "What technologies connect to Apache Spark?"
+corpusatlas query --graph graph.json --ask "How is Airflow connected to Kafka?"
+corpusatlas query --graph graph.json --ask "Compare PostgreSQL and Spark"
+```
+
+### 3. In-Memory W3C SPARQL 1.1 Engine (`sparql`)
+Query entities, types, and relationships using standard SPARQL pattern matching directly over the graph:
+```bash
+corpusatlas sparql --graph graph.json --query "SELECT ?tech ?db WHERE { ?tech a :Technology . ?tech :writes_to ?db }"
+```
+
+### 4. Graph Topology & Health Analytics (`analyze`)
+Compute network topology metrics, component sizes, articulation points (single points of failure / SPOF via Hopcroft-Tarjan), and an overall health score (0–100):
+```bash
+corpusatlas analyze --graph graph.json
+corpusatlas analyze --graph graph.json --json
+```
+
+### 5. Declarative Architecture Linter (`lint`)
+Enforce architectural boundaries, forbidden cross-tier edges (e.g. Presentation $\to$ Database), required metadata attributes, and acyclic dependencies in CI/CD (exits with code 1 on violations):
+```bash
+corpusatlas lint --graph graph.json --rules architecture_rules.toml
+```
+
+### 6. Model Context Protocol (MCP) Server (`serve-mcp`)
 Expose your knowledge graph to AI coding assistants (Claude Desktop, Cursor, Gemini Antigravity) over standard I/O:
 ```bash
 corpusatlas serve-mcp --graph graph.json
