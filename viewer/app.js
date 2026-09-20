@@ -18,258 +18,76 @@ import forceAtlas2 from 'https://cdn.jsdelivr.net/npm/graphology-layout-forceatl
 import pagerank from 'https://cdn.jsdelivr.net/npm/graphology-metrics@2.4.0/centrality/pagerank/+esm';
 import { createEdgeCurveProgram } from 'https://cdn.jsdelivr.net/npm/@sigma/edge-curve@3.1.0/+esm';
 
+import {
+  TYPE_COLOR,
+  DYNAMIC_PALETTE,
+  getTypeColor,
+  TYPE_LABEL,
+  TYPE_SHORT,
+  ENTITY_ORDER,
+  DEFAULTS,
+  STORE_KEY,
+  COMPARES_WEIGHT,
+  RATIO_MIN,
+  RATIO_MAX,
+  CITE_CAP,
+  MINIMAP_SIZE,
+  REL_GROUP_COLOR,
+} from './js/constants.js';
+
+import {
+  esc,
+  relText,
+  fmtDate,
+  clamp,
+  capitalise,
+  alpha,
+  hashSeed,
+  loadScript,
+  resolveGraph,
+  resolveSigma,
+  shortLabel,
+  dedupeLabels,
+  loadSettings,
+} from './js/utils.js';
+
+import {
+  bfsDist as bfsDistAlgo,
+  shortestPath as shortestPathAlgo,
+  computeMultiPath as computeMultiPathAlgo,
+  computeCommunitiesFallback as computeCommunitiesFallbackAlgo,
+  computeBetweennessFallback as computeBetweennessFallbackAlgo,
+  computeCentrality as computeCentralityAlgo,
+} from './js/algorithms.js';
+
+import {
+  buildContext,
+  TIER_TITLE,
+  tierChip,
+  contextHtml,
+  linksHtml,
+  walkRow as walkRowFmt,
+  nodePinHtml as nodePinHtmlFmt,
+  sourceHtml as sourceHtmlFmt,
+  edgePinHtml as edgePinHtmlFmt,
+  pathHtml as pathHtmlFmt,
+} from './js/context.js';
+
+import {
+  fa2Settings,
+  computeLayoutPositions,
+  switchLayout as switchLayoutAnimation,
+} from './js/layouts.js';
+
+import { createParticleController } from './js/particles.js';
+import { createMinimapController } from './js/minimap.js';
+
 const urlParams = new URLSearchParams(window.location.search);
 const GRAPH_URL = urlParams.get('data') || 'graph.json';
 const CDN = {
   graphology: 'https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js',
   sigma: 'https://cdn.jsdelivr.net/npm/sigma@3.0.1/dist/sigma.min.js',
 };
-
-// Colours come in families, so the kind of thing is readable before the
-// label is: teal for ideas, amber/orange for things you run, pink/indigo for
-// things you buy and who sells them, cyan for use cases.
-const TYPE_COLOR = {
-  Concept:             '#14b8a6',
-  ArchitecturePattern: '#0d9488',
-  Technology:          '#f59e0b',
-  Component:           '#f97316',
-  Language:            '#fbbf24',
-  API:                 '#d97706',
-  Protocol:            '#eab308',
-  Standard:            '#ca8a04',
-  FileFormat:          '#fb923c',
-  TableFormat:         '#ea580c',
-  Product:             '#ec4899',
-  CloudService:        '#db2777',
-  Company:             '#6366f1',
-  UseCase:             '#06b6d4',
-  // Biological & Ecological types
-  Mammal:              '#f59e0b',
-  Bird:                '#06b6d4',
-  Reptile:             '#10b981',
-  Amphibian:           '#84cc16',
-  Fish:                '#3b82f6',
-  Invertebrate:        '#8b5cf6',
-  Habitat:             '#14b8a6',
-  Diet:                '#ec4899',
-  Taxon:               '#a855f7',
-  Animal:              '#f97316',
-};
-const DYNAMIC_PALETTE = [
-  '#f59e0b', '#14b8a6', '#ec4899', '#3b82f6', '#8b5cf6',
-  '#10b981', '#f97316', '#06b6d4', '#eab308', '#6366f1',
-  '#84cc16', '#a855f7', '#0ea5e9', '#f43f5e', '#d946ef'
-];
-function getTypeColor(type) {
-  if (TYPE_COLOR[type]) return TYPE_COLOR[type];
-  let hash = 0;
-  for (let i = 0; i < (type || "").length; i++) hash = (hash * 31 + type.charCodeAt(i)) | 0;
-  return DYNAMIC_PALETTE[Math.abs(hash) % DYNAMIC_PALETTE.length];
-}
-const TYPE_LABEL = {
-  Concept: 'Concept', ArchitecturePattern: 'Architecture pattern', Technology: 'Technology',
-  Component: 'Component', Language: 'Language', API: 'API', Protocol: 'Protocol', Standard: 'Standard',
-  FileFormat: 'File format', TableFormat: 'Table format', Product: 'Product', CloudService: 'Cloud service',
-  Company: 'Company', UseCase: 'Use case',
-  Document: 'Article', Assessment: 'Radar assessment', RadarEntry: 'Radar entry', Topic: 'Topic',
-  Mammal: 'Mammal', Bird: 'Bird', Reptile: 'Reptile', Amphibian: 'Amphibian', Fish: 'Fish',
-  Invertebrate: 'Invertebrate', Habitat: 'Habitat', Diet: 'Diet', Taxon: 'Taxon', Animal: 'Animal',
-};
-// Only to disambiguate two on-screen labels that collide.
-const TYPE_SHORT = {
-  Concept: 'Concept', ArchitecturePattern: 'Pattern', Technology: 'Tech', Component: 'Component',
-  Language: 'Language', API: 'API', Protocol: 'Protocol', Standard: 'Standard', FileFormat: 'Format',
-  TableFormat: 'Table format', Product: 'Product', CloudService: 'Service', Company: 'Company', UseCase: 'Use case',
-  Mammal: 'Mammal', Bird: 'Bird', Reptile: 'Reptile', Amphibian: 'Amphibian', Fish: 'Fish',
-  Invertebrate: 'Invert', Habitat: 'Habitat', Diet: 'Diet', Taxon: 'Taxon', Animal: 'Animal',
-};
-const ENTITY_ORDER = ['Technology', 'Component', 'Product', 'CloudService', 'Concept', 'ArchitecturePattern',
-  'Language', 'API', 'Protocol', 'Standard', 'FileFormat', 'TableFormat', 'Company', 'UseCase',
-  'Mammal', 'Bird', 'Reptile', 'Amphibian', 'Fish', 'Invertebrate', 'Habitat', 'Diet', 'Taxon', 'Animal'];
-
-// Panel settings. Forces map onto ForceAtlas2: centre → gravity, repel →
-// scalingRatio, link → a multiplier on every edge's weight.
-const DEFAULTS = {
-  depth: 1, orphans: true, comparisons: true,
-  textFade: 7, nodeSize: 1, linkWidth: 1, arrows: false,
-  center: 0.4, repel: 25, link: 1,
-  hiddenTypes: [],
-};
-const STORE_KEY = 'kb-graph-settings-v2';
-// Scorecard comparisons are 110 of ~200 edges and say only "scored on the same
-// axes". At full weight they pull every assessed tool into one ball.
-const COMPARES_WEIGHT = 0.25;
-// Camera ratio bounds. A non-finite or extreme ratio renders the whole graph
-// collapsed to a point — the production bug this guard exists for.
-const RATIO_MIN = 0.08;
-const RATIO_MAX = 1.6;
-const CITE_CAP = 10;
-const MINIMAP_SIZE = 116;
-// One colour per relation group, so the graph's shape reads before a click:
-// structure in blue, concepts in violet, data flow in green, and so on.
-const REL_GROUP_COLOR = {
-  Structure: '#38bdf8', Concepts: '#a78bfa', 'Data flow': '#34d399',
-  Commercial: '#fb7185', Alternatives: '#fbbf24',
-  Trophic: '#ef4444', Ecology: '#10b981', Taxonomy: '#3b82f6', Comparative: '#8b5cf6',
-  Other: '#94a3b8',
-};
-
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const relText = (rel) => rel.replace(/_/g, ' ').toLowerCase();
-const fmtDate = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const capitalise = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-
-function alpha(hex, a) {
-  const h = hex.replace('#', '');
-  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-}
-
-// Deterministic seed positions, so the same graph always settles the same way.
-function hashSeed(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return () => {
-    h += 0x6d2b79f5;
-    let t = h;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`failed to load ${src}`));
-    document.head.appendChild(s);
-  });
-}
-const resolveGraph = () => (window.graphology && (window.graphology.Graph || window.graphology));
-const resolveSigma = () => (window.Sigma && (window.Sigma.Sigma || window.Sigma));
-
-// Every entity's evidence — articles, radar calls, assessments — for its card.
-function buildContext(data, byId, entityTypes) {
-  const context = new Map();
-  const slot = (id) => {
-    if (!context.has(id)) context.set(id, { articles: new Map(), radar: new Map(), assessments: new Map() });
-    return context.get(id);
-  };
-  const rank = { deterministic: 0, curated: 1, extracted: 2 };
-  for (const e of data.edges) {
-    const src = byId.get(e.src), dst = byId.get(e.dst);
-    if (!src || !dst) continue;
-    const srcEnt = entityTypes.has(src.type), dstEnt = entityTypes.has(dst.type);
-    if (srcEnt === dstEnt) continue;
-    const [entity, page] = srcEnt ? [src, dst] : [dst, src];
-    const bucket = page.type === 'Document' ? 'articles' : page.type === 'RadarEntry' ? 'radar'
-      : page.type === 'Assessment' ? 'assessments' : null;
-    if (!bucket) continue;
-    const list = slot(entity.id)[bucket];
-    const prev = list.get(page.id);
-    // One entry per page; keep the strongest tier when several edges link it.
-    const tier = e.prov && e.prov.tier;
-    if (!prev || (rank[tier] ?? 3) < (rank[prev.tier] ?? 3)) {
-      list.set(page.id, {
-        id: page.id, label: page.label, url: page.url, date: page.meta && page.meta.date,
-        ring: page.meta && page.meta.ring, edition: page.meta && (page.meta.reviewed || page.meta.edition),
-        quadrant: page.meta && page.meta.quadrant,
-        category: page.meta && page.meta.category,
-        rel: e.rel, tier
-      });
-    }
-  }
-  // Articles a person tagged or a pack cites come before text matches; newest first.
-  const TIER_RANK = { deterministic: 0, curated: 0, extracted: 1 };
-  const newest = (a, b) => (TIER_RANK[a.tier] ?? 2) - (TIER_RANK[b.tier] ?? 2)
-    || (b.date || '').localeCompare(a.date || '') || a.label.localeCompare(b.label);
-  for (const [id, c] of context) {
-    context.set(id, {
-      articles: [...c.articles.values()].sort(newest),
-      radar: [...c.radar.values()].sort((a, b) => a.label.localeCompare(b.label)),
-      assessments: [...c.assessments.values()].sort((a, b) => a.label.localeCompare(b.label)),
-    });
-  }
-  return context;
-}
-
-const TIER_TITLE = {
-  extracted: 'A word-boundary match of this entity\'s name in the article text, not a tag a person set',
-  curated: 'From an entity pack: model-drafted, every link machine-checked',
-};
-function tierChip(tier) {
-  return tier && tier !== 'deterministic'
-    ? `<b class="kb-tier kb-tier-${esc(tier)}" title="${esc(TIER_TITLE[tier] || tier)}">${esc(tier)}</b>` : '';
-}
-
-function contextHtml(ctx, { articleCap = CITE_CAP, compact = false } = {}) {
-  if (!ctx) return '';
-  const sections = [];
-  if (ctx.radar.length || ctx.assessments.length) {
-    const items = [
-      ...ctx.radar.map((r) =>
-        `<li><a href="${esc(r.url || '#')}">${esc(r.label)}</a> ` +
-        `<span class="kb-ring kb-ring-${esc(r.ring || '')}">${esc(capitalise(r.ring || ''))}</span>` +
-        (r.edition ? ` <span class="kb-cite-date">${esc(r.edition)}</span>` : '') +
-        (r.category ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${esc(r.category)}</div>` : '') +
-        `</li>`),
-      ...(compact ? [] : ctx.assessments.map((a) =>
-        `<li><a href="${esc(a.url || '#')}">${esc(a.label)}</a> <span class="kb-cite-date">assessment</span></li>`)),
-    ];
-    sections.push(`<div class="kb-cites"><span class="kb-cites-label">Radar &amp; Recommendations</span><ul>${items.join('')}</ul></div>`);
-  }
-  if (ctx.articles.length) {
-    const cap = compact ? 3 : articleCap;
-    const items = ctx.articles.slice(0, cap).map((c) =>
-      `<li><a href="${esc(c.url || '#')}">${esc(c.label)}</a>` +
-      (c.date ? ` <span class="kb-cite-date">${fmtDate(c.date)}</span>` : '') + tierChip(c.tier) + `</li>`);
-    if (ctx.articles.length > cap) items.push(`<li class="kb-cite-more">+${ctx.articles.length - cap} more</li>`);
-    sections.push(`<div class="kb-cites"><span class="kb-cites-label">Related articles</span><ul>${items.join('')}</ul></div>`);
-  }
-  return sections.join('');
-}
-
-function shortLabel(label) {
-  let s = label;
-  if (s.length > 34) {
-    const cut = s.search(/[:—–]/);
-    if (cut > 10) s = s.slice(0, cut).trim();
-  }
-  return s.length > 34 ? `${s.slice(0, 32).trimEnd()}…` : s;
-}
-
-// Suffix the type only on names that actually collide, so labels stay short.
-function dedupeLabels(nodes) {
-  const short = new Map(nodes.map((n) => [n.id, shortLabel(n.label)]));
-  const counts = new Map();
-  for (const n of nodes) {
-    const key = short.get(n.id).toLowerCase();
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  return new Map(nodes.map((n) => {
-    const s = short.get(n.id);
-    return [n.id, counts.get(s.toLowerCase()) > 1 ? `${s} · ${TYPE_SHORT[n.type] || n.type}` : s];
-  }));
-}
-
-function loadSettings() {
-  let s = { ...DEFAULTS };
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (raw && typeof raw === 'object') s = { ...s, ...raw };
-  } catch (err) { /* private mode or blocked storage: defaults */ }
-  if (typeof window !== 'undefined' && window.location) {
-    const q = new URLSearchParams(window.location.search);
-    if (q.has('depth')) s.depth = clamp(parseInt(q.get('depth'), 10) || s.depth, 1, 3);
-    if (q.get('orphans') === '0') s.orphans = false;
-    if (q.get('cmp') === '0') s.comparisons = false;
-    if (q.get('cmp') === '1') s.comparisons = true;
-  }
-  return s;
-}
 
 export async function initKbGraph(root) {
   if (!root) return;
@@ -817,315 +635,39 @@ export async function initKbGraph(root) {
   // failure) rather than the whole unfiltered graph.
   // Distances from one root, over the currently-visible graph, treating
   // every edge as undirected for the walk (same convention as computeFocus).
-  function bfsDist(root) {
-    const dist = new Map([[root, 0]]);
-    let frontier = [root];
-    while (frontier.length) {
-      const next = [];
-      for (const id of frontier) {
-        g.forEachEdge(id, (e, a, s, t) => {
-          if (!edgeVisible(e)) return;
-          const other = s === id ? t : s;
-          if (dist.has(other) || !nodeVisible(other)) return;
-          dist.set(other, dist.get(id) + 1);
-          next.push(other);
-        });
-      }
-      frontier = next;
-    }
-    return dist;
-  }
-
-  // Every shortest path, not an arbitrary one BFS happened to find first:
-  // an edge (u,v) lies on SOME shortest from -> to route exactly when
-  // distFrom[u] + 1 + distTo[v] equals the overall shortest distance (or
-  // the reverse orientation). Two equally-short routes between the same
-  // pair are common in a graph this interconnected, and picking just one
-  // silently hides the other.
-  function shortestPath(from, to) {
-    if (from === to) return { nodes: [from], edges: [], hopCount: 0, chain: [from] };
-    const distFrom = bfsDist(from);
-    if (!distFrom.has(to)) return null;
-    const distTo = bfsDist(to);
-    const hopCount = distFrom.get(to);
-    const nodes = new Set(), edges = new Set();
-    const chainPrev = new Map([[from, null]]); // one readable example route
-    let frontier = [from];
-    while (frontier.length) {
-      const next = [];
-      for (const id of frontier) {
-        g.forEachEdge(id, (e, a, s, t) => {
-          if (!edgeVisible(e)) return;
-          const other = s === id ? t : s;
-          if (!nodeVisible(other) || !distFrom.has(other) || !distTo.has(other)) return;
-          const onShortest = distFrom.get(id) + 1 + distTo.get(other) === hopCount;
-          if (!onShortest) return;
-          if (distFrom.get(other) === distFrom.get(id) + 1) {
-            edges.add(e);
-            nodes.add(id); nodes.add(other);
-            if (!chainPrev.has(other)) { chainPrev.set(other, { from: id, edge: e }); next.push(other); }
-          }
-        });
-      }
-      frontier = next;
-    }
-    const chain = [to];
-    let cur = to;
-    while (chainPrev.get(cur)) { cur = chainPrev.get(cur).from; chain.unshift(cur); }
-    return { nodes: [...nodes], edges: [...edges], hopCount, chain };
-  }
-
-  function computeMultiPath(waypoints) {
-    if (!waypoints || waypoints.length < 2) return null;
-    const allNodes = new Set();
-    const allEdges = new Set();
-    let totalHops = 0;
-    const fullChain = [];
-
-    for (let i = 0; i < waypoints.length - 1; i++) {
-      const leg = shortestPath(waypoints[i], waypoints[i + 1]);
-      if (!leg) return null;
-      leg.nodes.forEach(n => allNodes.add(n));
-      leg.edges.forEach(e => allEdges.add(e));
-      totalHops += leg.hopCount;
-      if (i === 0) fullChain.push(...leg.chain);
-      else fullChain.push(...leg.chain.slice(1));
-    }
-    return { nodes: [...allNodes], edges: [...allEdges], hopCount: totalHops, chain: fullChain, waypoints };
-  }
+  const bfsDist = (root) => bfsDistAlgo(g, root, nodeVisible, edgeVisible);
+  const shortestPath = (from, to) => shortestPathAlgo(g, from, to, nodeVisible, edgeVisible);
+  const computeMultiPath = (waypoints) => computeMultiPathAlgo(g, waypoints, nodeVisible, edgeVisible);
 
   const COMMUNITY_COLORS = [
     '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6',
     '#06b6d4', '#f97316', '#14b8a6', '#6366f1', '#84cc16',
     '#e11d48', '#0284c7', '#a855f7', '#d97706', '#059669',
-    '#4f46e5', '#ca8a04', '#db2777', '#2563eb', '#16a34a'
+    '#4f46e5', '#ca8a04', '#db2777', '#2563eb', '#16a34a',
   ];
   let communityMode = false;
   let communityMap = new Map();
 
-  function computeCommunitiesFallback(graph) {
-    const communities = new Map();
-    let cid = 0;
-    graph.forEachNode(node => { communities.set(node, cid++); });
-    for (let iter = 0; iter < 4; iter++) {
-      graph.forEachNode(u => {
-        const counts = new Map();
-        graph.forEachNeighbor(u, v => {
-          const c = communities.get(v);
-          counts.set(c, (counts.get(c) || 0) + 1);
-        });
-        let bestC = communities.get(u), maxCount = 0;
-        for (const [c, cnt] of counts.entries()) {
-          if (cnt > maxCount) { maxCount = cnt; bestC = c; }
-        }
-        communities.set(u, bestC);
-      });
-    }
-    const map = new Map();
-    let nextId = 0;
-    const result = {};
-    for (const [node, c] of communities.entries()) {
-      if (!map.has(c)) map.set(c, nextId++);
-      result[node] = map.get(c);
-    }
-    return result;
-  }
+  const computeCommunitiesFallback = (graph) => computeCommunitiesFallbackAlgo(graph);
+  const computeBetweennessFallback = (graph) => computeBetweennessFallbackAlgo(graph);
+  const computeCentrality = () => computeCentralityAlgo(g, byId, pr);
 
-  function computeBetweennessFallback(graph) {
-    const cb = new Map();
-    graph.forEachNode(n => cb.set(n, 0));
-    const nodes = graph.nodes();
-    for (const s of nodes) {
-      const S = [];
-      const P = new Map();
-      const sigma = new Map();
-      const d = new Map();
-      for (const v of nodes) {
-        P.set(v, []);
-        sigma.set(v, 0);
-        d.set(v, -1);
-      }
-      sigma.set(s, 1);
-      d.set(s, 0);
-      const Q = [s];
-      while (Q.length) {
-        const v = Q.shift();
-        S.push(v);
-        graph.forEachNeighbor(v, w => {
-          if (d.get(w) < 0) {
-            Q.push(w);
-            d.set(w, d.get(v) + 1);
-          }
-          if (d.get(w) === d.get(v) + 1) {
-            sigma.set(w, sigma.get(w) + sigma.get(v));
-            P.get(w).push(v);
-          }
-        });
-      }
-      const delta = new Map();
-      for (const v of nodes) delta.set(v, 0);
-      while (S.length) {
-        const w = S.pop();
-        for (const v of P.get(w)) {
-          delta.set(v, delta.get(v) + (sigma.get(v) / sigma.get(w)) * (1 + delta.get(w)));
-        }
-        if (w !== s) cb.set(w, cb.get(w) + delta.get(w));
-      }
-    }
-    return cb;
-  }
-
-  function computeCentrality() {
-    const degreeList = [];
-    g.forEachNode(n => {
-      degreeList.push({ id: n, label: (byId.get(n) || {}).label || n, score: g.degree(n) });
-    });
-    degreeList.sort((a, b) => b.score - a.score);
-
-    const prList = [];
-    g.forEachNode(n => {
-      prList.push({ id: n, label: (byId.get(n) || {}).label || n, score: (pr.get(n) || 0) });
-    });
-    prList.sort((a, b) => b.score - a.score);
-
-    const cb = computeBetweennessFallback(g);
-    const bwList = [];
-    for (const [n, val] of cb.entries()) {
-      bwList.push({ id: n, label: (byId.get(n) || {}).label || n, score: Math.round(val * 10) / 10 });
-    }
-    bwList.sort((a, b) => b.score - a.score);
-
-    return { degree: degreeList.slice(0, 7), pagerank: prList.slice(0, 7), betweenness: bwList.slice(0, 7) };
-  }
-
-  const layoutPositions = { force: new Map(), dag: new Map(), radar: new Map() };
+  let layoutPositions = { force: new Map(), dag: new Map(), radar: new Map(), circular: new Map() };
   let currentLayout = 'force';
 
-  function initLayouts() {
-    // 1. Force positions
-    g.forEachNode((n, a) => {
-      layoutPositions.force.set(n, { x: a.x, y: a.y });
-    });
-
-    // 2. DAG (Hierarchical) Layout
-    const depths = new Map();
-    g.forEachNode(n => {
-      if (g.inDegree(n) === 0) depths.set(n, 0);
-    });
-    // Fallback if graph is circular or has no sources
-    if (depths.size === 0) {
-      g.forEachNode((n, i) => { if (i % 5 === 0) depths.set(n, 0); });
-    }
-    const queue = [...depths.keys()];
-    let head = 0;
-    while (head < queue.length) {
-      const u = queue[head++];
-      const d = depths.get(u);
-      if (d >= 8) continue;
-      g.forEachEdge(u, (e, a, s, t) => {
-        if (s !== u) return; // directed DAG walk
-        if (!depths.has(t)) {
-          depths.set(t, d + 1);
-          queue.push(t);
-        }
-      });
-    }
-    g.forEachNode(n => { if (!depths.has(n)) depths.set(n, 0); });
-
-    const byDepth = new Map();
-    depths.forEach((d, n) => {
-      if (!byDepth.has(d)) byDepth.set(d, []);
-      byDepth.get(d).push(n);
-    });
-
-    const maxDepth = Math.max(...depths.values(), 1);
-    byDepth.forEach((nodes, d) => {
-      const y = (d - maxDepth / 2) * 180;
-      const count = nodes.length;
-      nodes.forEach((n, i) => {
-        const x = (i - count / 2) * 140;
-        layoutPositions.dag.set(n, { x, y });
-      });
-    });
-
-    // 3. Radar Layout
-    const R_MAX = 700;
-    const quadrantAngles = {
-      'techniques': Math.PI / 4,
-      'tools': 3 * Math.PI / 4,
-      'platforms': 5 * Math.PI / 4,
-      'languages-and-frameworks': 7 * Math.PI / 4,
-      // Animal quadrants
-      'mammals': Math.PI / 4,
-      'birds': 3 * Math.PI / 4,
-      'reptiles-and-amphibians': 5 * Math.PI / 4,
-      'aquatic-and-invertebrates': 7 * Math.PI / 4,
-    };
-    const ringRadii = {
-      'adopt': 0.22 * R_MAX,
-      'trial': 0.45 * R_MAX,
-      'assess': 0.68 * R_MAX,
-      'hold': 0.90 * R_MAX,
-    };
-
-    g.forEachNode((n, idx) => {
-      const meta = (byId.get(n) || {}).meta || {};
-      const ctxRadar = (context.get(n)?.radar || [])[0] || {};
-      const q = (meta.quadrant || ctxRadar.quadrant || '').toLowerCase();
-      const r = (meta.ring || ctxRadar.ring || '').toLowerCase();
-      const baseAngle = quadrantAngles[q] !== undefined ? quadrantAngles[q] : ((idx % 4) * Math.PI / 2 + Math.PI / 4);
-      const baseRadius = ringRadii[r] !== undefined ? ringRadii[r] : (0.5 * R_MAX);
-
-      // deterministic hash jitter
-      let hash = 0;
-      for (let c = 0; c < n.length; c++) hash = (hash * 31 + n.charCodeAt(c)) & 0xffffffff;
-      const jitterAngle = ((hash % 100) / 100 - 0.5) * (Math.PI / 3);
-      const jitterR = (((hash >> 4) % 100) / 100 - 0.5) * 80;
-
-      const angle = baseAngle + jitterAngle;
-      const radius = Math.max(40, baseRadius + jitterR);
-      layoutPositions.radar.set(n, {
-        x: Math.round(radius * Math.cos(angle)),
-        y: Math.round(radius * Math.sin(angle))
-      });
-    });
-  }
   try {
-    initLayouts();
+    layoutPositions = computeLayoutPositions(g, byId, context);
   } catch (err) {
-    console.warn('initLayouts failed:', err);
+    console.warn('computeLayoutPositions failed:', err);
   }
 
   function switchLayout(targetMode) {
-
-
     if (!layoutPositions[targetMode] || layoutPositions[targetMode].size === 0) return;
     currentLayout = targetMode;
-    const targetMap = layoutPositions[targetMode];
-    const startPos = new Map();
-    g.forEachNode((n, a) => { startPos.set(n, { x: a.x, y: a.y }); });
-
-    const startTime = performance.now();
-    const duration = 480;
-
-    function step(now) {
-      const p = Math.min(1, (now - startTime) / duration);
-      const ease = 1 - Math.pow(1 - p, 3); // cubic ease out
-      g.forEachNode((n) => {
-        const s = startPos.get(n);
-        const t = targetMap.get(n) || s;
-        g.setNodeAttribute(n, 'x', s.x + (t.x - s.x) * ease);
-        g.setNodeAttribute(n, 'y', s.y + (t.y - s.y) * ease);
-      });
-      renderer.refresh();
-      if (p < 1) {
-        requestAnimationFrame(step);
-      } else {
-        try { renderer.setCustomBBox(renderer.getBBox()); } catch (e) {}
-        fit();
-      }
-    }
-    requestAnimationFrame(step);
+    switchLayoutAnimation(g, renderer, targetMode, layoutPositions, () => {
+      try { renderer.setCustomBBox(renderer.getBBox()); } catch (e) {}
+      fit();
+    });
   }
 
   function drawNodeHover(context, data, settings) {
@@ -1555,156 +1097,26 @@ export async function initKbGraph(root) {
     minimapCanvas.height = mmSize * dpr;
     minimapCtx.scale(dpr, dpr);
   }
-  function drawMinimap() {
-    if (!minimapCtx) return;
-    // Sigma only recomputes the transform graphToViewport()/getNodeDisplayData()
-    // read from on its own render pass, which camera.animate() schedules for
-    // the next frame rather than applying synchronously — so a minimap redraw
-    // triggered from the SAME tick as a camera move (the common case) would
-    // read one frame stale without forcing that render first.
-    renderer.refresh({ skipIndexation: true });
-    minimapCtx.clearRect(0, 0, mmSize, mmSize);
-    // Track the nodes at each display-space extreme while drawing dots, to
-    // calibrate the viewport-pixel <-> display-space mapping below — Sigma
-    // exposes no direct conversion between the two, and hand-deriving one
-    // from camera ratio/shape once produced a rectangle 80% too large.
-    let xLo = null, xHi = null, yLo = null, yHi = null;
-    g.forEachNode((n) => {
-      if (!nodeVisible(n)) return;
-      const d = renderer.getNodeDisplayData(n);
-      if (!d || !Number.isFinite(d.x)) return;
-      minimapCtx.fillStyle = d.color || '#94a3b8';
-      minimapCtx.beginPath();
-      minimapCtx.arc(d.x * mmSize, d.y * mmSize, 1.4, 0, Math.PI * 2);
-      minimapCtx.fill();
-      if (!xLo || d.x < xLo.x) xLo = { id: n, x: d.x };
-      if (!xHi || d.x > xHi.x) xHi = { id: n, x: d.x };
-      if (!yLo || d.y < yLo.y) yLo = { id: n, y: d.y };
-      if (!yHi || d.y > yHi.y) yHi = { id: n, y: d.y };
-    });
-    if (!xLo || xLo.id === xHi.id || yLo.id === yHi.id) return; // not enough spread to calibrate
-    const vp = (id) => renderer.graphToViewport(g.getNodeAttributes(id));
-    const xLoVp = vp(xLo.id).x, xHiVp = vp(xHi.id).x, yLoVp = vp(yLo.id).y, yHiVp = vp(yHi.id).y;
-    const A = (xHiVp - xLoVp) / (xHi.x - xLo.x), B = xLoVp - A * xLo.x;
-    const C = (yHiVp - yLoVp) / (yHi.y - yLo.y), D = yLoVp - C * yLo.y;
-    if (![A, B, C, D].every(Number.isFinite)) return;
-    const w = stage.clientWidth, h = stage.clientHeight;
-    // Invert the fit: which display-space x/y do the current screen edges show.
-    const x0 = clamp((0 - B) / A, -0.5, 1.5) * mmSize, x1 = clamp((w - B) / A, -0.5, 1.5) * mmSize;
-    const y0 = clamp((0 - D) / C, -0.5, 1.5) * mmSize, y1 = clamp((h - D) / C, -0.5, 1.5) * mmSize;
-    minimapCtx.strokeStyle = dark ? 'rgba(226,232,240,0.85)' : 'rgba(30,41,59,0.75)';
-    minimapCtx.lineWidth = 1;
-    minimapCtx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
-  }
+  const minimapController = createMinimapController({
+    minimapCanvas,
+    graph: g,
+    renderer,
+    stage,
+    getDark: () => dark,
+    isNodeVisible: (n) => nodeVisible(n),
+    moveCamera,
+  });
   if (minimapCanvas) {
-    camera.on('updated', drawMinimap);
-    const jump = (ev) => {
-      const rect = minimapCanvas.getBoundingClientRect();
-      moveCamera({
-        x: clamp((ev.clientX - rect.left) / rect.width, 0, 1),
-        y: clamp((ev.clientY - rect.top) / rect.height, 0, 1),
-      }, 200);
-    };
-    let mmDragging = false;
-    minimapCanvas.addEventListener('mousedown', (ev) => { mmDragging = true; jump(ev); });
-    window.addEventListener('mousemove', (ev) => { if (mmDragging) jump(ev); });
-    window.addEventListener('mouseup', () => { mmDragging = false; });
+    minimapController.init();
+    camera.on('updated', () => minimapController.draw());
   }
+  const drawMinimap = () => minimapController.draw();
 
   // ---- Cards --------------------------------------------------------------
-  function linksHtml(n) {
-    const refs = n.urls || {};
-    const links = [];
-    if (refs.wikipedia) links.push(`<a href="${esc(refs.wikipedia)}" target="_blank" rel="noopener">Wikipedia &nearr;</a>`);
-    if (refs.canonical) links.push(`<a href="${esc(refs.canonical)}" target="_blank" rel="noopener">Website &nearr;</a>`);
-    return links.join(' ');
-  }
-
-  // A node's visible relationships, each read from this node's end: Spark
-  // "implements" lazy evaluation; lazy evaluation is "implemented by" Spark.
-  function neighbours(node) {
-    const out = [];
-    g.forEachEdge(node, (e, a, s, t) => {
-      if (!edgeVisible(e)) return;
-      const other = s === node ? t : s;
-      if (!nodeVisible(other)) return;
-      out.push({ edge: e, id: other, rel: s === node ? a.rel : (inverseLabel[a.rel] || a.rel), tier: a.tier, scope: a.scope });
-    });
-    return out;
-  }
-
-  function walkRow(r) {
-    const n = byId.get(r.id);
-    return `<button type="button" class="kb-walk" data-kb-walk="${esc(r.id)}">` +
-      `<span class="kb-dot" style="background:${getTypeColor(n.type)}"></span>` +
-      `<span class="kb-walk-name">${esc(n.label)}</span>` +
-      (r.scope ? `<i class="kb-walk-scope">${esc(r.scope)}</i>` : '') + tierChip(r.tier) + `</button>`;
-  }
-
-  function nodePinHtml(node) {
-    const n = byId.get(node);
-    const rows = neighbours(node);
-    const byRel = new Map();
-    for (const r of rows) {
-      if (!byRel.has(r.rel)) byRel.set(r.rel, []);
-      byRel.get(r.rel).push(r);
-    }
-    const relSections = [...byRel.entries()]
-      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
-      .map(([rel, rs]) =>
-        `<div class="kb-walk-group"><span class="kb-cites-label">${esc(relText(rel))} <span class="kb-walk-n">${rs.length}</span></span>` +
-        rs.sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0)).map(walkRow).join('') + `</div>`)
-      .join('');
-    const links = linksHtml(n);
-    return (
-      `<button type="button" class="kb-pin-close" data-kb-pin-close aria-label="Close and clear the focus">&times;</button>` +
-      `<span class="kb-card-type" style="--c:${getTypeColor(n.type)}">${esc(TYPE_LABEL[n.type] || n.type)}</span>` +
-      `<strong>${esc(n.label)}</strong>` +
-      (n.meta && n.meta.description ? `<p class="kb-pin-desc">${esc(n.meta.description)}</p>` : '') +
-      (links ? `<div class="kb-pin-links">${links}</div>` : '') +
-      (rows.length
-        ? `<div class="kb-walks" role="group" aria-label="Connected entities — choose one to move along that edge">${relSections}</div>`
-        : `<p class="kb-pin-empty">No relationships under the current filters.</p>`) +
-      contextHtml(context.get(node), { articleCap: 5 })
-    );
-  }
-
-  function sourceHtml(a) {
-    const parts = [];
-    const doc = a.doc && byId.get(a.doc);
-    if (a.doc && a.doc.startsWith('pack:')) {
-      const slug = a.doc.slice(5);
-      parts.push(`<a href="/knowledge-base/entities/${esc(slug)}.json">${esc(slug)} entity pack</a>`);
-    } else if (doc) {
-      parts.push(`<a href="${esc(doc.url || '#')}">${esc(doc.label)}</a>${a.via ? ` <span class="kb-cite-date">${esc(a.via)}</span>` : ''}`);
-    }
-    for (const url of a.sources || []) {
-      let host = url;
-      try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (err) { /* keep raw */ }
-      parts.push(`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(host)} &nearr;</a>`);
-    }
-    return parts.length
-      ? `<div class="kb-cites"><span class="kb-cites-label">Source</span><ul>${parts.map((p) => `<li>${p}</li>`).join('')}</ul></div>` : '';
-  }
-
-  function edgePinHtml(edge) {
-    const a = g.getEdgeAttributes(edge);
-    const [s, t] = g.extremities(edge);
-    const end = (id) => walkRow({ id });
-    return (
-      `<button type="button" class="kb-pin-close" data-kb-pin-close aria-label="Close">&times;</button>` +
-      `<span class="kb-card-type" style="--c:var(--accent-primary)">Relationship</span>` +
-      `<div class="kb-edge-ends">${end(s)}<span class="kb-edge-rel">${esc(relText(a.rel))} &darr;</span>${end(t)}</div>` +
-      (a.scope ? `<p class="kb-pin-desc"><b>Scope:</b> ${esc(a.scope)}</p>` : '') +
-      (a.explanation ? `<p class="kb-pin-desc">${esc(a.explanation)}</p>` : '') +
-      `<p class="kb-edge-meta">` +
-        (a.confidence != null ? `Confidence ${Math.round(a.confidence * 100)}%` : '') +
-        (a.tier ? `${a.confidence != null ? ' · ' : ''}${esc(a.tier)}` : '') +
-        (a.rel === 'COMPARES_TO' ? ' · scored on the same scorecard axes' : '') +
-      `</p>` +
-      sourceHtml(a)
-    );
-  }
+  const walkRow = (r) => walkRowFmt(r, byId);
+  const nodePinHtml = (node) => nodePinHtmlFmt(node, byId, neighbours(node), context, degree);
+  const sourceHtml = (a) => sourceHtmlFmt(a, byId);
+  const edgePinHtml = (edge) => edgePinHtmlFmt(edge, g, byId);
 
   function openPin(html) {
     pinBox.innerHTML = html;
@@ -1921,33 +1333,7 @@ export async function initKbGraph(root) {
 
   let pathWaypoints = [];
 
-  function pathHtml(result) {
-    const { nodes, edges, hopCount, chain, waypoints } = result;
-    const waypointChips = (waypoints || pathWaypoints || []).map((w, idx) => {
-      const label = esc((byId.get(w) || {}).label || w);
-      return `<span class="kb-waypoint-chip">${label} <button type="button" class="kb-waypoint-del" data-kb-del-waypoint="${idx}" aria-label="Remove waypoint">&times;</button></span>`;
-    }).join(' &rarr; ');
-
-    const rows = chain.map((id, i) => {
-      let rel = null;
-      if (i > 0) {
-        g.forEachEdge(chain[i - 1], (e, a, s, t) => {
-          if (!rel && ((s === chain[i - 1] && t === id) || (s === id && t === chain[i - 1]))) rel = a.rel;
-        });
-      }
-      const hop = rel ? `<div class="kb-edge-rel">${esc(relText(rel))} &darr;</div>` : '';
-      return hop + walkRow({ id });
-    }).join('');
-    const otherRoutes = nodes.length > chain.length || edges.length > chain.length - 1;
-    return (
-      `<button type="button" class="kb-pin-close" data-kb-pin-close aria-label="Close">&times;</button>` +
-      `<span class="kb-card-type" style="--c:var(--accent-primary)">Waypoint Route &middot; ${hopCount} hop${hopCount === 1 ? '' : 's'}</span>` +
-      `<div class="kb-waypoint-list" style="margin: 0.4rem 0;">${waypointChips}</div>` +
-      `<div class="kb-edge-ends" style="max-height:240px; overflow-y:auto;">${rows}</div>` +
-      `<p class="kb-pin-desc" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">Shift-click another entity to add it as a waypoint.</p>` +
-      (otherRoutes ? `<p class="kb-pin-desc">One example route &mdash; other equally-short paths are highlighted too.</p>` : '')
-    );
-  }
+  const pathHtml = (result) => pathHtmlFmt(result, byId, pathWaypoints, g);
 
   function showPath(fromId, toId) {
     pathWaypoints = [fromId, toId];
@@ -2896,77 +2282,22 @@ export async function initKbGraph(root) {
 
   // ---- Flow Particles Animation Loop ----
   const particlesCanvas = root.querySelector('[data-kb-particles]');
-  let particleOffset = 0;
-  let particleRaf = 0;
-  let particlesRunning = false;
+  const particleController = createParticleController({
+    canvas: particlesCanvas,
+    stage,
+    graph: g,
+    renderer,
+    getDark: () => dark,
+    isNodeVisible: (n) => nodeVisible(n),
+    isEdgeVisible: (e) => edgeVisible(e),
+  });
 
   function updateParticlesCanvasSize() {
-    if (!particlesCanvas || !stage) return;
-    const targetW = stageW || stage.clientWidth || 800;
-    const targetH = stageH || stage.clientHeight || 600;
-    if (particlesCanvas.width !== targetW || particlesCanvas.height !== targetH) {
-      particlesCanvas.width = targetW;
-      particlesCanvas.height = targetH;
-    }
-  }
-
-  function renderParticles() {
-    if (!particlesRunning) return;
-    if (particlesCanvas && stage) {
-      updateParticlesCanvasSize();
-      const ctx = particlesCanvas.getContext('2d');
-      ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
-
-      let activeEdges = [];
-      if (pathMode && pathEdgeSet && pathEdgeSet.size) {
-        activeEdges = [...pathEdgeSet];
-      } else if (selected) {
-        activeEdges = g.edges(selected).filter(e => edgeVisible(e));
-      }
-
-      if (activeEdges.length > 0 && activeEdges.length <= 40) {
-        particleOffset = (particleOffset + 0.014) % 1;
-        ctx.fillStyle = dark ? '#38bdf8' : '#0284c7';
-        ctx.shadowColor = dark ? '#38bdf8' : '#0284c7';
-        ctx.shadowBlur = 5;
-
-        for (const e of activeEdges) {
-          const [s, t] = g.extremities(e);
-          if (!nodeVisible(s) || !nodeVisible(t)) continue;
-          const sa = g.getNodeAttributes(s);
-          const ta = g.getNodeAttributes(t);
-          const sp = renderer.graphToViewport(sa);
-          const tp = renderer.graphToViewport(ta);
-
-          const px = sp.x + (tp.x - sp.x) * particleOffset;
-          const py = sp.y + (tp.y - sp.y) * particleOffset;
-
-          ctx.beginPath();
-          ctx.arc(px, py, 2.8, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        particleRaf = requestAnimationFrame(renderParticles);
-      } else {
-        particlesRunning = false;
-        ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
-      }
-    }
+    particleController.updateSize();
   }
 
   checkParticlesState = () => {
-    const hasParticles = (pathMode && pathEdgeSet && pathEdgeSet.size > 0) || !!selected;
-    if (hasParticles && !particlesRunning) {
-      particlesRunning = true;
-      cancelAnimationFrame(particleRaf);
-      particleRaf = requestAnimationFrame(renderParticles);
-    } else if (!hasParticles && particlesRunning) {
-      particlesRunning = false;
-      cancelAnimationFrame(particleRaf);
-      if (particlesCanvas) {
-        const ctx = particlesCanvas.getContext('2d');
-        ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
-      }
-    }
+    particleController.checkState(selected, pathMode, pathEdgeSet);
   };
 
   drawMinimap();

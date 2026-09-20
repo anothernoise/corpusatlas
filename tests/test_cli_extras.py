@@ -455,3 +455,38 @@ def test_viewer_performance_assets_and_optimizations():
     assert "checkParticlesState" in content
     assert "hoverRaf = requestAnimationFrame" in content
     assert "updateParticlesCanvasSize" in content
+
+
+def test_viewer_modular_js_architecture():
+    """Verify that viewer JavaScript is organized into modular ES files adhering to best practices:
+    zero external build tooling, ES module imports, functional patterns, and clean separation."""
+    viewer_dir = Path(__file__).resolve().parents[1] / "viewer"
+    js_dir = viewer_dir / "js"
+    assert js_dir.is_dir(), "viewer/js/ directory must exist"
+
+    expected_modules = {
+        "constants.js": ["TYPE_COLOR", "getTypeColor", "DEFAULTS", "MINIMAP_SIZE"],
+        "utils.js": ["esc", "relText", "fmtDate", "clamp", "hashSeed", "loadSettings"],
+        "algorithms.js": ["bfsDist", "shortestPath", "computeMultiPath", "computeCommunitiesFallback", "computeCentrality"],
+        "context.js": ["buildContext", "tierChip", "contextHtml", "nodePinHtml", "edgePinHtml", "pathHtml"],
+        "layouts.js": ["fa2Settings", "computeLayoutPositions", "switchLayout"],
+        "particles.js": ["createParticleController"],
+        "minimap.js": ["createMinimapController"],
+    }
+
+    for mod_name, expected_exports in expected_modules.items():
+        mod_path = js_dir / mod_name
+        assert mod_path.exists(), f"viewer/js/{mod_name} must exist"
+        mod_content = mod_path.read_text(encoding="utf-8")
+        for sym in expected_exports:
+            assert sym in mod_content, f"viewer/js/{mod_name} must define or export {sym}"
+
+    app_js = viewer_dir / "app.js"
+    app_content = app_js.read_text(encoding="utf-8")
+    for mod_name in expected_modules.keys():
+        assert f"./js/{mod_name}" in app_content, f"viewer/app.js must import from ./js/{mod_name}"
+
+    index_html = viewer_dir / "index.html"
+    index_content = index_html.read_text(encoding="utf-8")
+    assert '<script type="module" src="app.js"></script>' in index_content
+
