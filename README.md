@@ -32,7 +32,9 @@ Two rules keep this a module rather than a framework:
    extract. A new source is a class with one `documents()` method; the
    existing seven are the reference for the shape — copy one, or ship yours
    as a separate installed package via the `corpusatlas.adapters` entry-point
-   group (see [docs/adapters.md](docs/adapters.md)) without forking this repo.
+   group (see [docs/adapters.md](docs/adapters.md)) without forking this repo
+   — [`examples/plugin-rss-adapter/`](examples/plugin-rss-adapter/) is a real,
+   working one of those, not just a snippet.
 2. **Output is files.** `corpusatlas` writes `graph.json` and exits. It owns no
    process, serves no requests, and has no opinion about what reads the output.
 

@@ -74,3 +74,9 @@ this way: `REGISTRY` is checked before any entry point, so a plugin claiming
 `type = "html_blog"` is simply ignored in favour of the real one. An unknown
 `type` reports every name it looked for, built-in and external, in the same
 error.
+
+`examples/plugin-rss-adapter/` is a real, working one of these — a local
+RSS/Atom feed file, in a package you can `pip install -e` as-is and copy to
+start your own. `tests/test_plugin_example_end_to_end.py` proves the whole
+path works (a fresh venv, two editable installs, a real `corpusatlas build`
+subprocess) rather than just the lookup code in isolation.
