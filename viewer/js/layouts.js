@@ -125,6 +125,24 @@ export function computeLayoutPositions(graph, byId, context) {
     nodeIdx++;
   });
 
+  // 5. Semantic Space (Vector Embeddings)
+  positions.semantic = new Map();
+  graph.forEachNode((n) => {
+    const meta = (byId.get(n) || {}).meta || {};
+    if (meta.semantic_x != null && meta.semantic_y != null) {
+      positions.semantic.set(n, { x: Number(meta.semantic_x), y: Number(meta.semantic_y) });
+    } else {
+      let hash = 0;
+      for (let i = 0; i < n.length; i++) hash = (hash << 5) - hash + n.charCodeAt(i);
+      const angle = (Math.abs(hash) % 360) * (Math.PI / 180);
+      const rad = 140 + (Math.abs(hash >> 3) % 360);
+      positions.semantic.set(n, {
+        x: Math.round(rad * Math.cos(angle)),
+        y: Math.round(rad * Math.sin(angle))
+      });
+    }
+  });
+
   return positions;
 }
 

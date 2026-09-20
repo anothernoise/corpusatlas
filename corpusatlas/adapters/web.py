@@ -234,7 +234,7 @@ class WebAdapter:
     def __init__(self, urls: list[str] | None = None, url_list_file: str | None = None,
                  timeout: float = 10.0, user_agent: str = f"corpusatlas/{__version__}",
                  max_workers: int = 8, max_retries: int = 2, retry_backoff: float = 0.5,
-                 respect_robots: bool = True):
+                 respect_robots: bool = True, http_cache: dict | None = None, **kwargs: Any):
         given = list(urls or [])
         if url_list_file:
             with open(url_list_file, encoding="utf-8") as f:
@@ -254,6 +254,7 @@ class WebAdapter:
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
         self.respect_robots = respect_robots
+        self.http_cache = http_cache if http_cache is not None else {}
         self._pool = _ConnectionPool(timeout)
         self._robots = _RobotsCache(user_agent, timeout) if respect_robots else None
 
@@ -263,10 +264,20 @@ class WebAdapter:
         path = parts.path or "/"
         if parts.query:
             path += "?" + parts.query
+        headers = {"User-Agent": self.user_agent, "Connection": "keep-alive"}
+        cached_entry = self.http_cache.get(url)
+        if cached_entry:
+            if cached_entry.get("etag"):
+                headers["If-None-Match"] = cached_entry["etag"]
+            if cached_entry.get("last_modified"):
+                headers["If-Modified-Since"] = cached_entry["last_modified"]
+
         try:
-            conn.request("GET", path, headers={"User-Agent": self.user_agent,
-                                               "Connection": "keep-alive"})
+            conn.request("GET", path, headers=headers)
             resp = conn.getresponse()
+            if resp.status == 304 and cached_entry and "body" in cached_entry:
+                resp.read()
+                return str(cached_entry["body"])
             body = resp.read()
         except (http.client.HTTPException, OSError):
             # The pooled connection may have gone stale (the server closed
@@ -285,7 +296,16 @@ class WebAdapter:
         if resp.status >= 400:
             raise urllib.error.HTTPError(url, resp.status, resp.reason, resp.headers, None)
 
-        return body.decode(_charset_of(resp.getheader("Content-Type")), errors="replace")
+        text = body.decode(_charset_of(resp.getheader("Content-Type")), errors="replace")
+        etag = resp.getheader("ETag")
+        last_modified = resp.getheader("Last-Modified")
+        if etag or last_modified:
+            self.http_cache[url] = {
+                "etag": etag,
+                "last_modified": last_modified,
+                "body": text,
+            }
+        return text
 
     def _fetch(self, url: str) -> str:
         if self._robots is not None:

@@ -1,5 +1,6 @@
 """Pure-Python graph layout engine (Fruchterman-Reingold / Force-Directed).
-Calculates 2D coordinates (x, y) for nodes with zero third-party dependencies.
+Calculates 2D coordinates (x, y), 3D coordinates (x, y, z), and Multi-Scale LOD tiers
+with zero third-party dependencies.
 """
 from __future__ import annotations
 
@@ -13,8 +14,9 @@ def compute_layout(nodes: list[dict[str, Any]],
                    iterations: int = 60,
                    area: float = 1000000.0,
                    use_barnes_hut: bool = True,
-                   theta: float = 0.5) -> list[dict[str, Any]]:
-    """Assigns 'x' and 'y' float coordinates to each node dictionary in place."""
+                   theta: float = 0.5,
+                   three_d: bool = False) -> list[dict[str, Any]]:
+    """Assigns 'x' and 'y' (and 'z' if three_d=True) float coordinates to each node dictionary in place."""
     if not nodes:
         return nodes
 
@@ -22,6 +24,8 @@ def compute_layout(nodes: list[dict[str, Any]],
     if count == 1:
         nodes[0]["x"] = 0.0
         nodes[0]["y"] = 0.0
+        if three_d:
+            nodes[0]["z"] = 0.0
         return nodes
 
     from .layout_bh import QuadTree
@@ -31,18 +35,31 @@ def compute_layout(nodes: list[dict[str, Any]],
     t = math.sqrt(area) / 10.0  # Initial temperature
     dt = t / (iterations + 1)
 
-    # Deterministic initial placement on a circle or seeded jitter
+    # Deterministic initial placement
     rng = random.Random(42)
     pos: dict[str, list[float]] = {}
     for i, node in enumerate(nodes):
         nid = node.get("id") or str(i)
-        # Use existing position if already present, else distribute in circle
-        if "x" in node and "y" in node and isinstance(node["x"], (int, float)):
-            pos[nid] = [float(node["x"]), float(node["y"])]
+        if three_d:
+            if "x" in node and "y" in node and "z" in node and isinstance(node.get("z"), (int, float)):
+                pos[nid] = [float(node["x"]), float(node["y"]), float(node["z"])]
+            else:
+                # Fibonacci sphere distribution
+                phi = math.acos(1.0 - 2.0 * (i + 0.5) / count)
+                theta_angle = math.pi * (1.0 + 5.0 ** 0.5) * (i + 0.5)
+                radius = k * math.sqrt(count) * 0.5 * (0.8 + 0.4 * rng.random())
+                pos[nid] = [
+                    radius * math.sin(phi) * math.cos(theta_angle),
+                    radius * math.sin(phi) * math.sin(theta_angle),
+                    radius * math.cos(phi)
+                ]
         else:
-            angle = (2.0 * math.pi * i) / count
-            radius = k * math.sqrt(count) * 0.5 * (0.8 + 0.4 * rng.random())
-            pos[nid] = [radius * math.cos(angle), radius * math.sin(angle)]
+            if "x" in node and "y" in node and isinstance(node["x"], (int, float)):
+                pos[nid] = [float(node["x"]), float(node["y"])]
+            else:
+                angle = (2.0 * math.pi * i) / count
+                radius = k * math.sqrt(count) * 0.5 * (0.8 + 0.4 * rng.random())
+                pos[nid] = [radius * math.cos(angle), radius * math.sin(angle)]
 
     node_ids = [n.get("id") or str(i) for i, n in enumerate(nodes)]
 
@@ -55,11 +72,12 @@ def compute_layout(nodes: list[dict[str, Any]],
             adj.append((s, d))
 
     # Main simulation loop
+    dim = 3 if three_d else 2
     for _ in range(iterations):
-        disp: dict[str, list[float]] = {nid: [0.0, 0.0] for nid in node_ids}
+        disp: dict[str, list[float]] = {nid: [0.0] * dim for nid in node_ids}
 
         # 1. Repulsive forces
-        if use_barnes_hut and count > 30:
+        if not three_d and use_barnes_hut and count > 30:
             x_vals = [pos[n][0] for n in node_ids]
             y_vals = [pos[n][1] for n in node_ids]
             min_x, max_x = min(x_vals), max(x_vals)
@@ -75,63 +93,102 @@ def compute_layout(nodes: list[dict[str, Any]],
         else:
             for i in range(count):
                 u = node_ids[i]
-                ux, uy = pos[u]
+                u_pos = pos[u]
                 for j in range(i + 1, count):
                     v = node_ids[j]
-                    vx, vy = pos[v]
-                    dx = ux - vx
-                    dy = uy - vy
-                    dist = math.hypot(dx, dy)
+                    v_pos = pos[v]
+                    delta = [u_pos[d] - v_pos[d] for d in range(dim)]
+                    dist = math.sqrt(sum(d * d for d in delta))
                     if dist < 0.0001:
-                        dx = (rng.random() - 0.5) * 0.1
-                        dy = (rng.random() - 0.5) * 0.1
-                        dist = math.hypot(dx, dy)
+                        delta = [(rng.random() - 0.5) * 0.1 for _ in range(dim)]
+                        dist = math.sqrt(sum(d * d for d in delta))
 
                     rep = (k * k) / dist
-                    fx = (dx / dist) * rep
-                    fy = (dy / dist) * rep
-                    disp[u][0] += fx
-                    disp[u][1] += fy
-                    disp[v][0] -= fx
-                    disp[v][1] -= fy
+                    for d in range(dim):
+                        f = (delta[d] / dist) * rep
+                        disp[u][d] += f
+                        disp[v][d] -= f
 
         # 2. Attractive forces along edges
         for u, v in adj:
-            ux, uy = pos[u]
-            vx, vy = pos[v]
-            dx = ux - vx
-            dy = uy - vy
-            dist = math.hypot(dx, dy)
+            u_pos = pos[u]
+            v_pos = pos[v]
+            delta = [u_pos[d] - v_pos[d] for d in range(dim)]
+            dist = math.sqrt(sum(d * d for d in delta))
             if dist < 0.0001:
                 continue
             att = (dist * dist) / k
-            fx = (dx / dist) * att
-            fy = (dy / dist) * att
-            disp[u][0] -= fx
-            disp[u][1] -= fy
-            disp[v][0] += fx
-            disp[v][1] += fy
+            for d in range(dim):
+                f = (delta[d] / dist) * att
+                disp[u][d] -= f
+                disp[v][d] += f
 
         # 3. Apply displacement clamped by temperature
         for nid in node_ids:
-            dx, dy = disp[nid]
-            dist = math.hypot(dx, dy)
+            cur_disp = disp[nid]
+            dist = math.sqrt(sum(d * d for d in cur_disp))
             if dist > 0.0001:
                 step = min(dist, t)
-                pos[nid][0] += (dx / dist) * step
-                pos[nid][1] += (dy / dist) * step
+                for d in range(dim):
+                    pos[nid][d] += (cur_disp[d] / dist) * step
 
         # Cool down
         t = max(0.01, t - dt)
 
-    # Normalize center to (0, 0)
-    avg_x = sum(p[0] for p in pos.values()) / count
-    avg_y = sum(p[1] for p in pos.values()) / count
+    # Normalize center to (0, 0, [0])
+    avg = [sum(p[d] for p in pos.values()) / count for d in range(dim)]
 
     for node in nodes:
         nid = node.get("id")
         if nid in pos:
-            node["x"] = round(pos[nid][0] - avg_x, 2)
-            node["y"] = round(pos[nid][1] - avg_y, 2)
+            node["x"] = round(pos[nid][0] - avg[0], 2)
+            node["y"] = round(pos[nid][1] - avg[1], 2)
+            if three_d:
+                node["z"] = round(pos[nid][2] - avg[2], 2)
 
+    return nodes
+
+
+def compute_multiscale_layout(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    iterations: int = 60,
+    dimensions: int = 2
+) -> list[dict[str, Any]]:
+    """Hierarchical Multi-Scale layout assignment with Level of Detail (LOD) tiers.
+
+    Partitions nodes into:
+      LOD 0: Core hubs and backbone topology (top ~15% degree/centrality)
+      LOD 1: Intermediate functional clusters (~35%)
+      LOD 2: Detailed leaf entities and nodes (~50%)
+    """
+    if not nodes:
+        return nodes
+
+    # Ensure degrees exist
+    degree_map: dict[str, int] = {}
+    for e in edges:
+        s, d = e.get("src"), e.get("dst")
+        if s:
+            degree_map[s] = degree_map.get(s, 0) + 1
+        if d:
+            degree_map[d] = degree_map.get(d, 0) + 1
+
+    sorted_nodes = sorted(nodes, key=lambda n: n.get("degree", degree_map.get(n.get("id", ""), 0)), reverse=True)
+    count = len(sorted_nodes)
+
+    lod0_cutoff = max(1, int(count * 0.15))
+    lod1_cutoff = max(lod0_cutoff + 1, int(count * 0.50))
+
+    for i, n in enumerate(sorted_nodes):
+        if i < lod0_cutoff:
+            n["lod"] = 0
+        elif i < lod1_cutoff:
+            n["lod"] = 1
+        else:
+            n["lod"] = 2
+
+    # Compute coordinates
+    three_d = dimensions == 3
+    compute_layout(nodes, edges, iterations=iterations, three_d=three_d)
     return nodes

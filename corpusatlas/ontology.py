@@ -62,7 +62,7 @@ class OntologyError(ValueError):
     fixed data; raised properly now that the data isn't always fixed."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Ontology:
     """The entity/relation vocabulary a build typechecks against.
 
@@ -73,18 +73,48 @@ class Ontology:
     entity_types: frozenset[str]
     context_types: frozenset[str]
     # relation -> (allowed source types, allowed target types)
-    relations: dict[str, tuple[frozenset[str], frozenset[str]]] = field(default_factory=dict)
+    relations: dict[str, tuple[frozenset[str], frozenset[str]]]
     # Relations stored in one direction and read in either. A pack may author
     # the inverse ("Concept IMPLEMENTED_BY Technology"); extraction flips it,
     # so the same fact can never be stored twice.
-    inverse: dict[str, str] = field(default_factory=dict)
+    inverse: dict[str, str]
     # Filter groups for the canvas — every semantic relation belongs to
     # exactly one. Context relations aren't filterable edges (they're a
     # card's link sections), so they're listed separately, not grouped.
-    relation_groups: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    context_relations: tuple[str, ...] = ()
+    relation_groups: dict[str, tuple[str, ...]]
+    context_relations: tuple[str, ...]
     # Undirected in meaning: stored as one direction, never both.
-    symmetric: frozenset[str] = frozenset()
+    symmetric: frozenset[str]
+
+    def __init__(
+        self,
+        entity_types: frozenset[str] | None = None,
+        context_types: frozenset[str] | None = None,
+        relations: dict[str, tuple[frozenset[str], frozenset[str]]] | None = None,
+        inverse: dict[str, str] | None = None,
+        relation_groups: dict[str, tuple[str, ...]] | None = None,
+        context_relations: tuple[str, ...] | None = None,
+        symmetric: frozenset[str] | None = None,
+    ):
+        if entity_types is None:
+            default = globals().get("DEFAULT")
+            if default is not None:
+                object.__setattr__(self, "entity_types", default.entity_types)
+                object.__setattr__(self, "context_types", default.context_types)
+                object.__setattr__(self, "relations", default.relations)
+                object.__setattr__(self, "inverse", default.inverse)
+                object.__setattr__(self, "relation_groups", default.relation_groups)
+                object.__setattr__(self, "context_relations", default.context_relations)
+                object.__setattr__(self, "symmetric", default.symmetric)
+                return
+        object.__setattr__(self, "entity_types", entity_types or frozenset())
+        object.__setattr__(self, "context_types", context_types or frozenset())
+        object.__setattr__(self, "relations", relations or {})
+        object.__setattr__(self, "inverse", inverse or {})
+        object.__setattr__(self, "relation_groups", relation_groups or {})
+        object.__setattr__(self, "context_relations", context_relations or ())
+        object.__setattr__(self, "symmetric", symmetric or frozenset())
+        self.__post_init__()
 
     def __post_init__(self):
         overlap = self.entity_types & self.context_types
@@ -120,6 +150,37 @@ class Ontology:
     @property
     def inverse_label(self) -> dict[str, str]:
         return {v: k for k, v in self.inverse.items()}
+
+    def filter_conforming_triples(
+        self,
+        entities: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Filters extracted entities and relations to retain only schema-conforming ones."""
+        valid_entities = []
+        valid_entity_types: dict[str, str] = {}
+        for ent in entities:
+            etype = ent.get("type", "")
+            eid = ent.get("id", "")
+            if etype in self.entity_types and eid:
+                valid_entities.append(ent)
+                valid_entity_types[eid] = etype
+
+        valid_relations = []
+        rel_map = {k.lower(): k for k in self.relations}
+        for rel in relations:
+            rname = rel.get("rel", "")
+            src = rel.get("src", "")
+            dst = rel.get("dst", "")
+            matched_key = rel_map.get(rname.lower())
+            if not matched_key:
+                continue
+            if src in valid_entity_types and dst in valid_entity_types:
+                rel_copy = dict(rel)
+                rel_copy["rel"] = matched_key.lower()
+                valid_relations.append(rel_copy)
+
+        return {"entities": valid_entities, "relations": valid_relations}
 
     def to_dot(self) -> str:
         """A Graphviz DOT rendering of this ontology's own type/relation
@@ -326,6 +387,7 @@ DEFAULT = Ontology(
         # integration is INTEGRATES_WITH, and a graph that confuses the two
         # ends up claiming Spark needs Hadoop.
         "INTEGRATES_WITH":   (TECH_LIKE, TECH_LIKE),
+        "CONSUMES":          (TECH_LIKE, TECH_LIKE),
         "MANAGED_BY":        (frozenset({"Technology"}), frozenset({"CloudService", "Product"})),
         "PROVIDED_BY":       (frozenset({"Product", "CloudService", "Technology"}), frozenset({"Company"})),
         "SUPPORTS_USE_CASE": (TECH_LIKE | {"Concept", "ArchitecturePattern"}, frozenset({"UseCase"})),
@@ -351,7 +413,7 @@ DEFAULT = Ontology(
     relation_groups={
         "Structure": ("HAS_COMPONENT", "BASED_ON", "INCLUDED_IN"),
         "Concepts": ("IMPLEMENTS", "SUPPORTS", "USES", "SUPPORTS_USE_CASE"),
-        "Data flow": ("READS", "WRITES", "RUNS_ON", "INTEGRATES_WITH"),
+        "Data flow": ("READS", "WRITES", "RUNS_ON", "INTEGRATES_WITH", "CONSUMES"),
         "Commercial": ("MANAGED_BY", "PROVIDED_BY"),
         "Alternatives": ("ALTERNATIVE_TO", "COMPLEMENTS", "COMPARES_TO"),
     },

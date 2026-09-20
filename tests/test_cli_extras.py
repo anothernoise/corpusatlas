@@ -472,6 +472,8 @@ def test_viewer_modular_js_architecture():
         "layouts.js": ["fa2Settings", "computeLayoutPositions", "switchLayout"],
         "particles.js": ["createParticleController"],
         "minimap.js": ["createMinimapController"],
+        "diff.js": ["computeGraphDiff", "applyDiffFilter", "renderNodeAttributeDiff"],
+        "embed.js": ["CorpusAtlasGraph"],
     }
 
     for mod_name, expected_exports in expected_modules.items():
@@ -484,9 +486,58 @@ def test_viewer_modular_js_architecture():
     app_js = viewer_dir / "app.js"
     app_content = app_js.read_text(encoding="utf-8")
     for mod_name in expected_modules.keys():
-        assert f"./js/{mod_name}" in app_content, f"viewer/app.js must import from ./js/{mod_name}"
+        if mod_name != "embed.js":
+            assert f"./js/{mod_name}" in app_content, f"viewer/app.js must import from ./js/{mod_name}"
 
     index_html = viewer_dir / "index.html"
     index_content = index_html.read_text(encoding="utf-8")
-    assert '<script type="module" src="app.js"></script>' in index_content
+    assert '<script type="module" src="app.js' in index_content
+
+
+def test_cli_layout_command():
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        graph_file = Path(d) / "graph.json"
+        graph_data = {
+            "schema_version": 1,
+            "nodes": [
+                {"id": "n1", "label": "Node 1", "type": "Technology"},
+                {"id": "n2", "label": "Node 2", "type": "Technology"},
+            ],
+            "edges": [
+                {"src": "n1", "rel": "links", "dst": "n2"},
+            ]
+        }
+        graph_file.write_text(json.dumps(graph_data), encoding="utf-8")
+        out_file = Path(d) / "layout_graph.json"
+
+        # 2D Multiscale
+        assert main(["layout", "--graph", str(graph_file), "--out", str(out_file), "--multiscale", "--iterations", "10"]) == 0
+        res = json.loads(out_file.read_text(encoding="utf-8"))
+        assert "x" in res["nodes"][0] and "y" in res["nodes"][0]
+        assert "lod" in res["nodes"][0]
+
+        # 3D
+        assert main(["layout", "--graph", str(graph_file), "--out", str(out_file), "--3d", "--iterations", "10"]) == 0
+        res3d = json.loads(out_file.read_text(encoding="utf-8"))
+        assert "z" in res3d["nodes"][0]
+
+
+def test_cli_index_pagefind_command():
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        graph_file = Path(d) / "graph.json"
+        graph_data = {
+            "schema_version": 1,
+            "nodes": [
+                {"id": "entity:py", "label": "Python", "type": "Technology", "meta": {"description": "Language"}}
+            ],
+            "edges": []
+        }
+        graph_file.write_text(json.dumps(graph_data), encoding="utf-8")
+        out_dir = Path(d) / "search"
+
+        assert main(["index-pagefind", "--graph", str(graph_file), "--out-dir", str(out_dir), "--clean"]) == 0
+        assert (out_dir / "entity_py.html").exists()
+
 

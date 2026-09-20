@@ -17,6 +17,11 @@
 import forceAtlas2 from 'https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/+esm';
 import pagerank from 'https://cdn.jsdelivr.net/npm/graphology-metrics@2.4.0/centrality/pagerank/+esm';
 import { createEdgeCurveProgram } from 'https://cdn.jsdelivr.net/npm/@sigma/edge-curve@3.1.0/+esm';
+import {
+  computeGraphDiff,
+  applyDiffFilter,
+  renderNodeAttributeDiff,
+} from './js/diff.js';
 
 import {
   TYPE_COLOR,
@@ -84,7 +89,7 @@ import { createMinimapController } from './js/minimap.js';
 import { createSearchEngine } from './js/search.js';
 import { exportPng, exportSvg, exportGexf, exportGraphml } from './js/export.js';
 import { createTimelinePlayer } from './js/timeline.js';
-import { create3DGraphController } from './js/view3d.js';
+import { create3DGraphController } from './js/view3d.js?v=0.4.2';
 
 const urlParams = typeof window !== 'undefined' && window.location ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const GRAPH_URL = urlParams.get('data') || 'graph.json';
@@ -573,9 +578,16 @@ export async function initKbGraph(root) {
   }
   const allDates = [...new Set(nodeDates.values())].sort();
   let timelineCutoff = null; // null = all time
+  let currentDiffFilter = 'all';
 
   const nodeVisible = (n) => {
     if (hiddenTypes.has(g.getNodeAttribute(n, "kind"))) return false;
+    if (currentDiffFilter && currentDiffFilter !== 'all') {
+      const d = g.getNodeAttribute(n, 'diff') || 'same';
+      if (currentDiffFilter === 'added' && d !== 'added') return false;
+      if (currentDiffFilter === 'removed' && d !== 'removed') return false;
+      if (currentDiffFilter === 'changed' && d !== 'changed' && d !== 'added' && d !== 'removed') return false;
+    }
     if (timelineCutoff) {
       const nData = byId.get(n);
       const vFrom = nData?.valid_from || nData?.meta?.valid_from || nodeDates.get(n);
@@ -585,8 +597,20 @@ export async function initKbGraph(root) {
     }
     return S.orphans || (visDeg.get(n) || 0) > 0;
   };
+  let allowedTiers = new Set(['curated', 'deterministic', 'inferred']);
+  let minConfidence = 0.0;
   const edgeVisible = (e) => {
     if (!allowedRels.has(g.getEdgeAttribute(e, 'rel'))) return false;
+    const tier = g.getEdgeAttribute(e, 'tier') || 'deterministic';
+    if (!allowedTiers.has(tier)) return false;
+    const conf = g.getEdgeAttribute(e, 'confidence');
+    if (minConfidence > 0 && conf != null && conf < minConfidence) return false;
+    if (currentDiffFilter && currentDiffFilter !== 'all') {
+      const d = g.getEdgeAttribute(e, 'diff') || 'same';
+      if (currentDiffFilter === 'added' && d !== 'added') return false;
+      if (currentDiffFilter === 'removed' && d !== 'removed') return false;
+      if (currentDiffFilter === 'changed' && d !== 'changed' && d !== 'added' && d !== 'removed') return false;
+    }
     const [s, t] = g.extremities(e);
     if (timelineCutoff) {
       const sData = byId.get(s), tData = byId.get(t);
@@ -1226,6 +1250,7 @@ export async function initKbGraph(root) {
       linksHtml(n) +
       (n.meta && n.meta.description ? `<p class="kb-centre-desc">${esc(n.meta.description)}</p>` : '') +
       (n.meta && n.meta.notes ? `<p class="kb-centre-note"><span>Classification:</span> ${esc(n.meta.notes)}</p>` : '') +
+      (n.diff && n.diff !== 'same' ? `<div class="kb-diff-attribute-panel">${renderNodeAttributeDiff(n._oldNode, n)}</div>` : '') +
       contextHtml(ctx);
     // The panel is collapsed by default, so the summary row is the only
     // place a reader sees which entity's details are inside before opening.
@@ -1644,8 +1669,7 @@ export async function initKbGraph(root) {
     }
   }
 
-  // ---- Shareable Permalink & Toast ----
-  const shareBtn = root.querySelector("[data-kb-copy-link]");
+  // ---- Shareable Permalink & Embed Modal ----
   const toastEl = document.querySelector("[data-kb-toast]");
   function showToast(msg) {
     if (!toastEl) return;
@@ -1653,24 +1677,77 @@ export async function initKbGraph(root) {
     toastEl.classList.add("is-visible");
     setTimeout(() => toastEl.classList.remove("is-visible"), 2200);
   }
+
+  const shareBtn = root.querySelector("[data-kb-copy-link]");
+  const shareModal = document.querySelector("[data-kb-share-modal]");
+  const shareClose = document.querySelector("[data-kb-share-close]");
+  const shareUrlInput = document.querySelector("[data-kb-share-url]");
+  const shareWcInput = document.querySelector("[data-kb-share-wc]");
+  const shareIframeInput = document.querySelector("[data-kb-share-iframe]");
+  const copyUrlBtn = document.querySelector("[data-kb-copy-url-btn]");
+  const copyWcBtn = document.querySelector("[data-kb-copy-wc-btn]");
+  const copyIframeBtn = document.querySelector("[data-kb-copy-iframe-btn]");
+
+  function getShareableUrl() {
+    const cam = camera.getState();
+    const params = new URLSearchParams(window.location.search);
+    params.set("depth", S.depth);
+    params.set("x", (Math.round(cam.x * 1000) / 1000).toFixed(3));
+    params.set("y", (Math.round(cam.y * 1000) / 1000).toFixed(3));
+    params.set("r", (Math.round(cam.ratio * 1000) / 1000).toFixed(3));
+    if (timelineCutoff) params.set("until", timelineCutoff);
+    return `${window.location.origin}${window.location.pathname}?${params.toString()}${selected ? "#" + selected : ""}`;
+  }
+
+  function openShareModal() {
+    if (!shareModal) return;
+    const permalink = getShareableUrl();
+    const origin = window.location.origin;
+    const basePath = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+    const embedScriptUrl = `${origin}${basePath}/js/embed.js`;
+    const graphDataUrl = GRAPH_URL.startsWith('http') ? GRAPH_URL : `${origin}${basePath}/${GRAPH_URL}`;
+
+    if (shareUrlInput) shareUrlInput.value = permalink;
+    if (shareWcInput) {
+      shareWcInput.value = `<script type="module" src="${embedScriptUrl}"></script>\n<corpusatlas-graph src="${graphDataUrl}" theme="${dark ? 'dark' : 'light'}" height="600px"></corpusatlas-graph>`;
+    }
+    if (shareIframeInput) {
+      shareIframeInput.value = `<iframe src="${permalink}" width="100%" height="600" frameborder="0" style="border:1px solid #334155; border-radius:8px;" allowfullscreen></iframe>`;
+    }
+
+    shareModal.hidden = false;
+    shareModal.style.display = 'flex';
+  }
+
+  function closeShareModal() {
+    if (!shareModal) return;
+    shareModal.hidden = true;
+    shareModal.style.display = 'none';
+  }
+
   if (shareBtn) {
-    shareBtn.addEventListener("click", () => {
-      const cam = camera.getState();
-      const params = new URLSearchParams(window.location.search);
-      params.set("depth", S.depth);
-      params.set("x", (Math.round(cam.x * 1000) / 1000).toFixed(3));
-      params.set("y", (Math.round(cam.y * 1000) / 1000).toFixed(3));
-      params.set("r", (Math.round(cam.ratio * 1000) / 1000).toFixed(3));
-      if (timelineCutoff) params.set("until", timelineCutoff);
-      const permalink = `${window.location.origin}${window.location.pathname}?${params.toString()}${selected ? "#" + selected : ""}`;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(permalink).then(() => showToast("Shareable link copied to clipboard!"));
-      } else {
-        showToast("Link created in address bar!");
-      }
-      history.replaceState(null, "", permalink);
+    shareBtn.addEventListener("click", openShareModal);
+  }
+  if (shareClose) {
+    shareClose.addEventListener("click", closeShareModal);
+  }
+  if (shareModal) {
+    shareModal.addEventListener("click", (e) => {
+      if (e.target === shareModal) closeShareModal();
     });
   }
+
+  function copyText(txt, successMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => showToast(successMsg));
+    } else {
+      showToast(successMsg);
+    }
+  }
+
+  if (copyUrlBtn) copyUrlBtn.addEventListener("click", () => copyText(shareUrlInput?.value || '', "Direct URL copied!"));
+  if (copyWcBtn) copyWcBtn.addEventListener("click", () => copyText(shareWcInput?.value || '', "Web Component snippet copied!"));
+  if (copyIframeBtn) copyIframeBtn.addEventListener("click", () => copyText(shareIframeInput?.value || '', "iFrame snippet copied!"));
 
   // ---- Export --------------------------------------------------------------
   function downloadBlob(blob, filename) {
@@ -1680,21 +1757,17 @@ export async function initKbGraph(root) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
-  // toBlob() on a canvas just drawImage()'d from a WebGL source (Sigma's own
-  // layers) can hand back null on its very first call in the same tick — a
-  // GPU-readback timing quirk, not a real failure — and reliably succeeds a
-  // frame later. One retry covers it without a user-visible delay.
+
   function toBlobRetry(canvasEl, cb, attemptsLeft = 2) {
     canvasEl.toBlob((blob) => {
       if (blob || attemptsLeft <= 1) { cb(blob); return; }
       requestAnimationFrame(() => toBlobRetry(canvasEl, cb, attemptsLeft - 1));
     });
   }
-  const exportPngBtn = root.querySelector('[data-kb-export-png]');
-  if (exportPngBtn) {
-    exportPngBtn.addEventListener('click', () => {
-      // Sigma layers several <canvas> elements (edges, nodes, labels, hover);
-      // a single flat PNG needs them composited in DOM order onto one canvas.
+
+  function doExport(format) {
+    const filenameBase = `knowledge-graph-${selected ? byId.get(selected)?.id?.slice(7) || 'item' : 'view'}`;
+    if (format === 'png') {
       const layers = [...canvas.querySelectorAll('canvas')];
       if (!layers.length) return;
       const out = document.createElement('canvas');
@@ -1705,51 +1778,76 @@ export async function initKbGraph(root) {
       ctx.fillRect(0, 0, out.width, out.height);
       for (const layer of layers) ctx.drawImage(layer, 0, 0, out.width, out.height);
       toBlobRetry(out, (blob) => {
-        if (blob) downloadBlob(blob, `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'overview'}.png`);
+        if (blob) downloadBlob(blob, `${filenameBase}.png`);
       });
-    });
-  }
-  const exportJsonBtn = root.querySelector('[data-kb-export-json]');
-  if (exportJsonBtn) {
-    exportJsonBtn.addEventListener('click', () => {
+    } else if (format === 'svg') {
+      exportSvg(g, renderer, (n) => nodeVisible(n), (e) => edgeVisible(e), `${filenameBase}.svg`);
+    } else if (format === 'gexf') {
+      exportGexf(g, byId, `${filenameBase}.gexf`);
+    } else if (format === 'graphml') {
+      exportGraphml(g, byId, `${filenameBase}.graphml`);
+    } else if (format === 'json') {
       const nodes = g.filterNodes((n) => nodeVisible(n)).map((n) => {
         const a = g.getNodeAttributes(n);
         const meta = byId.get(n);
-        return { id: n, label: meta.label, type: meta.type, x: a.x, y: a.y };
+        return { id: n, label: meta?.label, type: meta?.type, x: a.x, y: a.y };
       });
       const edges = g.filterEdges((e) => edgeVisible(e)).map((e) => {
         const a = g.getEdgeAttributes(e);
         const [s, t] = g.extremities(e);
         return { source: s, target: t, relation: a.rel, confidence: a.confidence ?? null, tier: a.tier ?? null };
       });
-      downloadBlob(new Blob([JSON.stringify({ nodes, edges }, null, 2)], { type: 'application/json' }),
-        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.json`);
+      downloadBlob(new Blob([JSON.stringify({ nodes, edges }, null, 2)], { type: 'application/json' }), `${filenameBase}.json`);
+    }
+  }
+
+  // Export Dropdown Trigger
+  const exportDropdown = root.querySelector('[data-kb-export-dropdown]');
+  const exportTrigger = root.querySelector('[data-kb-export-trigger]');
+  const exportMenu = root.querySelector('[data-kb-export-menu]');
+
+  if (exportTrigger && exportMenu) {
+    exportTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = exportMenu.hidden || exportMenu.style.display === 'none';
+      exportMenu.hidden = !isHidden;
+      exportMenu.style.display = isHidden ? 'flex' : 'none';
+      exportTrigger.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!exportDropdown?.contains(e.target)) {
+        exportMenu.hidden = true;
+        exportMenu.style.display = 'none';
+        exportTrigger.setAttribute('aria-expanded', 'false');
+      }
     });
   }
 
+  const exportItems = root.querySelectorAll('[data-kb-export-format]');
+  exportItems.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const format = btn.getAttribute('data-kb-export-format');
+      if (exportMenu) {
+        exportMenu.hidden = true;
+        exportMenu.style.display = 'none';
+        if (exportTrigger) exportTrigger.setAttribute('aria-expanded', 'false');
+      }
+      doExport(format);
+    });
+  });
+
+  // Settings Panel Export Buttons
+  const exportPngBtn = root.querySelector('[data-kb-export-png]');
+  if (exportPngBtn) exportPngBtn.addEventListener('click', () => doExport('png'));
+  const exportJsonBtn = root.querySelector('[data-kb-export-json]');
+  if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => doExport('json'));
   const exportSvgBtn = root.querySelector('[data-kb-export-svg]');
-  if (exportSvgBtn) {
-    exportSvgBtn.addEventListener('click', () => {
-      exportSvg(g, renderer, (n) => nodeVisible(n), (e) => edgeVisible(e),
-        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.svg`);
-    });
-  }
-
+  if (exportSvgBtn) exportSvgBtn.addEventListener('click', () => doExport('svg'));
   const exportGexfBtn = root.querySelector('[data-kb-export-gexf]');
-  if (exportGexfBtn) {
-    exportGexfBtn.addEventListener('click', () => {
-      exportGexf(g, byId,
-        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.gexf`);
-    });
-  }
-
+  if (exportGexfBtn) exportGexfBtn.addEventListener('click', () => doExport('gexf'));
   const exportGraphmlBtn = root.querySelector('[data-kb-export-graphml]');
-  if (exportGraphmlBtn) {
-    exportGraphmlBtn.addEventListener('click', () => {
-      exportGraphml(g, byId,
-        `knowledge-graph-${selected ? byId.get(selected).id.slice(7) : 'view'}.graphml`);
-    });
-  }
+  if (exportGraphmlBtn) exportGraphmlBtn.addEventListener('click', () => doExport('graphml'));
 
   if (panel) {
     // Open by default where there is room for it; a phone starts with the canvas.
@@ -2228,18 +2326,105 @@ export async function initKbGraph(root) {
     } catch (err) { /* ignore */ }
     if (!restored) fitAll();
   }
-  // ---- Diff Banner ----
+  // ---- Diff Banner & Controls ----
+  const diffBanner = root.querySelector('[data-kb-diff-banner]');
+  const diffToggleBtn = root.querySelector('[data-kb-diff-toggle]');
+  const diffFilters = root.querySelectorAll('[data-kb-diff-filter]');
+  const diffFileInput = root.querySelector('[data-kb-diff-file]');
+  const diffExitBtn = root.querySelector('[data-kb-diff-exit]');
+
+  function updateDiffBannerUI(summary) {
+    if (!diffBanner || !summary) return;
+    const addEl = diffBanner.querySelector('[data-kb-diff-added]');
+    const remEl = diffBanner.querySelector('[data-kb-diff-removed]');
+    const chgEl = diffBanner.querySelector('[data-kb-diff-changed]');
+    if (addEl) addEl.textContent = `+${summary.nodes_added} added`;
+    if (remEl) remEl.textContent = `-${summary.nodes_removed} removed`;
+    if (chgEl) chgEl.textContent = `~${summary.nodes_changed} changed`;
+  }
+
   if (data.diff_summary) {
-    const banner = root.querySelector('[data-kb-diff-banner]');
-    if (banner) {
-      banner.hidden = false;
-      const addEl = banner.querySelector('[data-kb-diff-added]');
-      const remEl = banner.querySelector('[data-kb-diff-removed]');
-      const chgEl = banner.querySelector('[data-kb-diff-changed]');
-      if (addEl) addEl.textContent = `+${data.diff_summary.nodes_added} added`;
-      if (remEl) remEl.textContent = `-${data.diff_summary.nodes_removed} removed`;
-      if (chgEl) chgEl.textContent = `~${data.diff_summary.nodes_changed} changed`;
-    }
+    updateDiffBannerUI(data.diff_summary);
+  }
+
+  if (diffToggleBtn && diffBanner) {
+    diffToggleBtn.addEventListener('click', () => {
+      const isHidden = diffBanner.hidden || diffBanner.style.display === 'none';
+      diffBanner.hidden = !isHidden;
+      diffBanner.style.display = isHidden ? 'flex' : 'none';
+      diffToggleBtn.classList.toggle('is-active', isHidden);
+      diffToggleBtn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+      if (!isHidden) {
+        currentDiffFilter = 'all';
+        diffFilters.forEach(b => b.classList.toggle('is-active', b.getAttribute('data-kb-diff-filter') === 'all'));
+        renderer.refresh();
+      }
+    });
+  }
+
+  if (diffExitBtn && diffBanner) {
+    diffExitBtn.addEventListener('click', () => {
+      diffBanner.hidden = true;
+      diffBanner.style.display = 'none';
+      if (diffToggleBtn) {
+        diffToggleBtn.classList.remove('is-active');
+        diffToggleBtn.setAttribute('aria-pressed', 'false');
+      }
+      currentDiffFilter = 'all';
+      diffFilters.forEach(b => b.classList.toggle('is-active', b.getAttribute('data-kb-diff-filter') === 'all'));
+      renderer.refresh();
+    });
+  }
+
+  if (diffFilters) {
+    diffFilters.forEach(btn => {
+      btn.addEventListener('click', () => {
+        diffFilters.forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        currentDiffFilter = btn.getAttribute('data-kb-diff-filter') || 'all';
+        renderer.refresh();
+      });
+    });
+  }
+
+  if (diffFileInput) {
+    diffFileInput.addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const oldGraph = JSON.parse(text);
+        const diffRes = computeGraphDiff(oldGraph, data);
+        for (const nd of diffRes.nodes) {
+          if (g.hasNode(nd.id)) {
+            g.setNodeAttribute(nd.id, 'diff', nd.diff);
+            if (nd._oldNode) g.setNodeAttribute(nd.id, '_oldNode', nd._oldNode);
+            const nObj = byId.get(nd.id);
+            if (nObj) {
+              nObj.diff = nd.diff;
+              if (nd._oldNode) nObj._oldNode = nd._oldNode;
+            }
+          }
+        }
+        for (const ed of diffRes.edges) {
+          const edgeId = g.edge(ed.src, ed.dst);
+          if (edgeId) {
+            g.setEdgeAttribute(edgeId, 'diff', ed.diff);
+          }
+        }
+        updateDiffBannerUI(diffRes.diff_summary);
+        diffBanner.hidden = false;
+        diffBanner.style.display = 'flex';
+        if (diffToggleBtn) {
+          diffToggleBtn.classList.add('is-active');
+          diffToggleBtn.setAttribute('aria-pressed', 'true');
+        }
+        showToast(`Compared against ${file.name}: +${diffRes.diff_summary.nodes_added} -${diffRes.diff_summary.nodes_removed} ~${diffRes.diff_summary.nodes_changed}`);
+        renderer.refresh();
+      } catch (err) {
+        showToast('Error reading candidate diff JSON');
+      }
+    });
   }
 
   // ---- Community Detection Toggle ----
@@ -2300,6 +2485,79 @@ export async function initKbGraph(root) {
     }
   });
 
+  // ---- Subgraph Filtering Drawer ----
+  const filterToggleBtn = root.querySelector('[data-kb-filter-toggle]');
+  const filterDrawer = root.querySelector('[data-kb-subgraph-drawer]');
+  const filterCloseBtn = root.querySelector('[data-kb-subgraph-close]');
+  const filterTierChecks = root.querySelectorAll('[data-kb-filter-tier]');
+  const filterConfSlider = root.querySelector('[data-kb-filter-conf-slider]');
+  const filterConfVal = root.querySelector('[data-kb-filter-conf-val]');
+  const filterSummary = root.querySelector('[data-kb-filter-summary]');
+  const filterResetBtn = root.querySelector('[data-kb-filter-reset]');
+
+  function updateFilterSummary() {
+    if (!filterSummary) return;
+    const visibleCount = g.filterEdges(e => edgeVisible(e)).length;
+    const totalCount = g.size;
+    filterSummary.textContent = `${visibleCount} / ${totalCount} edges`;
+    if (filterToggleBtn) {
+      const isFiltered = allowedTiers.size < 3 || minConfidence > 0;
+      filterToggleBtn.classList.toggle('is-active', isFiltered);
+    }
+  }
+
+  function applyFilterChange() {
+    computeVisDeg();
+    updateFilterSummary();
+    renderer.refresh();
+    drawMinimap();
+    if (checkParticlesState) checkParticlesState();
+  }
+
+  if (filterToggleBtn && filterDrawer) {
+    filterToggleBtn.addEventListener('click', () => {
+      const isHidden = filterDrawer.hidden;
+      filterDrawer.hidden = !isHidden;
+      filterToggleBtn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+      if (isHidden) updateFilterSummary();
+    });
+  }
+
+  if (filterCloseBtn && filterDrawer) {
+    filterCloseBtn.addEventListener('click', () => {
+      filterDrawer.hidden = true;
+      if (filterToggleBtn) filterToggleBtn.setAttribute('aria-pressed', 'false');
+    });
+  }
+
+  filterTierChecks.forEach(chk => {
+    chk.addEventListener('change', () => {
+      const tier = chk.getAttribute('data-kb-filter-tier');
+      if (chk.checked) allowedTiers.add(tier);
+      else allowedTiers.delete(tier);
+      applyFilterChange();
+    });
+  });
+
+  if (filterConfSlider) {
+    filterConfSlider.addEventListener('input', (e) => {
+      minConfidence = parseFloat(e.target.value) || 0.0;
+      if (filterConfVal) filterConfVal.textContent = minConfidence.toFixed(2);
+      applyFilterChange();
+    });
+  }
+
+  if (filterResetBtn) {
+    filterResetBtn.addEventListener('click', () => {
+      allowedTiers = new Set(['curated', 'deterministic', 'inferred']);
+      minConfidence = 0.0;
+      filterTierChecks.forEach(c => c.checked = true);
+      if (filterConfSlider) filterConfSlider.value = '0';
+      if (filterConfVal) filterConfVal.textContent = '0.00';
+      applyFilterChange();
+    });
+  }
+
   // ---- Layout Mode Switcher ----
   const layoutSelect = root.querySelector('[data-kb-layout-select]');
   if (layoutSelect) {
@@ -2337,11 +2595,20 @@ export async function initKbGraph(root) {
       graph: g,
       byId,
       onNodeClick: (id) => select(id),
+      getFocusedNodeId: () => selected,
+      onFlightChange: (isFlying) => {
+        if (isFlying) {
+          showToast('Touring graph — Space to pause, arrows to step');
+        }
+      },
     });
     threeDToggleBtn.addEventListener('click', async () => {
       const active = controller3D.toggle();
       threeDToggleBtn.classList.toggle('is-active', active);
       threeDToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      if (active) {
+        showToast('3D Cosmos Explorer active — Drag deck or press Space to start tour');
+      }
     });
   }
 

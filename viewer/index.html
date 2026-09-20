@@ -9,6 +9,39 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  // Polyfill Three.js r174+ matrixWorld.determinantAffine compatibility across bundles
+  (function() {
+    function detAffine() {
+      var te = this.elements;
+      if (!te || te.length < 16) return 1;
+      var n11 = te[0], n12 = te[4], n13 = te[8];
+      var n21 = te[1], n22 = te[5], n23 = te[9];
+      var n31 = te[2], n32 = te[6], n33 = te[10];
+      return (
+        n11 * (n22 * n33 - n23 * n32) -
+        n12 * (n21 * n33 - n23 * n31) +
+        n13 * (n21 * n32 - n22 * n31)
+      );
+    }
+    if (typeof Object.prototype.determinantAffine !== 'function') {
+      Object.defineProperty(Object.prototype, 'determinantAffine', {
+        value: detAffine,
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
+    }
+    if (typeof Object.prototype.determinant3x3 !== 'function') {
+      Object.defineProperty(Object.prototype, 'determinant3x3', {
+        value: detAffine,
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
+    }
+  })();
+</script>
 </head>
 <body>
 
@@ -39,31 +72,89 @@
         <option value="force">ForceAtlas2</option>
         <option value="dag">Hierarchical (DAG)</option>
         <option value="radar">Radar Matrix</option>
+        <option value="semantic">Semantic Space (Embeddings)</option>
       </select>
 
-      <button type="button" class="kb-expand-btn" data-kb-clusters-btn aria-label="Toggle Louvain community clusters" title="Topical Clusters">
-        <span>Clusters</span>
-      </button>
+      <div class="kb-btn-group kb-analytics-group" role="group" aria-label="Analytics & Exploration Tools">
+        <button type="button" class="kb-group-btn" data-kb-clusters-btn aria-label="Toggle Louvain community clusters" aria-pressed="false" title="Topical Clusters">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8.5" y1="7.5" x2="15.5" y2="7.5"/><line x1="7.5" y1="8.5" x2="10.5" y2="15.5"/><line x1="16.5" y1="8.5" x2="13.5" y2="15.5"/></svg>
+          <span>Clusters</span>
+        </button>
 
-      <button type="button" class="kb-expand-btn" data-kb-insights-btn aria-label="Open Centrality & Hub Insights" title="Hubs & Centrality Insights">
-        <span>Hubs</span>
-      </button>
+        <button type="button" class="kb-group-btn" data-kb-insights-btn aria-label="Open Centrality & Hub Insights" aria-pressed="false" title="Hubs & Centrality Insights">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+          <span>Hubs</span>
+        </button>
 
-      <button type="button" class="kb-expand-btn" data-kb-3d-toggle aria-label="Toggle 3D Force-Directed Graph View" title="3D WebGL Mode">
-        <span>3D</span>
-      </button>
+        <button type="button" class="kb-group-btn" data-kb-filter-toggle aria-label="Toggle Subgraph Filtering" aria-pressed="false" title="Filter by Tier, Confidence & Attributes">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span>Filter</span>
+        </button>
 
-      <button type="button" class="kb-expand-btn" data-kb-timeline-btn aria-label="Toggle Temporal Evolution Player" title="Time-Travel Timeline">
-        <span>Timeline</span>
-      </button>
+        <button type="button" class="kb-group-btn" data-kb-3d-toggle aria-label="Toggle 3D Force-Directed Graph View" aria-pressed="false" title="3D WebGL Mode">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>3D</span>
+        </button>
 
-      <button type="button" class="kb-expand-btn" data-kb-export-png aria-label="Export high-resolution PNG snapshot" title="Export PNG">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        <span>Export</span>
-      </button>
+        <button type="button" class="kb-group-btn" data-kb-timeline-btn aria-label="Toggle Temporal Evolution Player" aria-pressed="false" title="Time-Travel Timeline">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Timeline</span>
+        </button>
 
-      <button type="button" class="kb-expand-btn" data-kb-copy-link aria-label="Copy shareable link to this view" title="Copy shareable link">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <button type="button" class="kb-group-btn" data-kb-diff-toggle aria-label="Toggle Visual Diff Mode" aria-pressed="false" title="Visual Diff Mode">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+          <span>Diff</span>
+        </button>
+      </div>
+
+      <div class="kb-dropdown" data-kb-export-dropdown>
+        <button type="button" class="kb-expand-btn" data-kb-export-trigger aria-label="Export graph in multiple formats" aria-haspopup="true" aria-expanded="false" title="Export graph">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>Export</span>
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="kb-dropdown-menu" data-kb-export-menu hidden>
+          <button type="button" class="kb-dropdown-item" data-kb-export-format="png">
+            <span class="kb-dropdown-icon">🖼</span>
+            <div class="kb-dropdown-text">
+              <strong>PNG Image</strong>
+              <small>High-resolution raster snapshot</small>
+            </div>
+          </button>
+          <button type="button" class="kb-dropdown-item" data-kb-export-format="svg">
+            <span class="kb-dropdown-icon">📐</span>
+            <div class="kb-dropdown-text">
+              <strong>Vector SVG</strong>
+              <small>Scalable vector graphics</small>
+            </div>
+          </button>
+          <button type="button" class="kb-dropdown-item" data-kb-export-format="json">
+            <span class="kb-dropdown-icon">📦</span>
+            <div class="kb-dropdown-text">
+              <strong>Graph JSON</strong>
+              <small>Raw nodes &amp; edges dataset</small>
+            </div>
+          </button>
+          <div class="kb-dropdown-divider"></div>
+          <button type="button" class="kb-dropdown-item" data-kb-export-format="gexf">
+            <span class="kb-dropdown-icon">🕸</span>
+            <div class="kb-dropdown-text">
+              <strong>Gephi GEXF</strong>
+              <small>Standard XML network format</small>
+            </div>
+          </button>
+          <button type="button" class="kb-dropdown-item" data-kb-export-format="graphml">
+            <span class="kb-dropdown-icon">🗂</span>
+            <div class="kb-dropdown-text">
+              <strong>GraphML</strong>
+              <small>Cytoscape &amp; yEd compatible</small>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <button type="button" class="kb-expand-btn" data-kb-copy-link aria-label="Share and embed this graph view" title="Share &amp; Embed">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         <span>Share</span>
       </button>
 
@@ -78,14 +169,26 @@
     </div>
   </div>
 
-  <div class="kb-diff-banner" data-kb-diff-banner hidden>
-    <div style="display:flex; align-items:center; gap:0.5rem;">
-      <strong>Diff View</strong>
+  <div class="kb-diff-banner" data-kb-diff-banner hidden style="display:none;">
+    <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+      <span class="kb-diff-title">Diff View</span>
       <span class="kb-diff-badge added" data-kb-diff-added>+0 added</span>
       <span class="kb-diff-badge removed" data-kb-diff-removed>-0 removed</span>
       <span class="kb-diff-badge changed" data-kb-diff-changed>~0 changed</span>
+      <div class="kb-diff-filters">
+        <button type="button" class="kb-diff-filter-btn is-active" data-kb-diff-filter="all">All</button>
+        <button type="button" class="kb-diff-filter-btn added" data-kb-diff-filter="added">+ Added</button>
+        <button type="button" class="kb-diff-filter-btn removed" data-kb-diff-filter="removed">- Removed</button>
+        <button type="button" class="kb-diff-filter-btn changed" data-kb-diff-filter="changed">~ Changed</button>
+      </div>
     </div>
-    <span style="font-size:0.7rem; color:var(--text-muted);">Comparing against base release</span>
+    <div style="display:flex; align-items:center; gap:0.5rem;">
+      <label class="kb-btn" style="cursor:pointer;">
+        <span>Compare With...</span>
+        <input type="file" accept=".json" data-kb-diff-file hidden>
+      </label>
+      <button type="button" class="kb-btn kb-diff-close-btn" data-kb-diff-exit title="Close Diff View">&times; Close</button>
+    </div>
   </div>
 
   <!-- Stage: WebGL Canvas & Floating Controls -->
@@ -97,6 +200,40 @@
       <button type="button" class="kb-btn" data-kb-timeline-play style="padding:2px 8px; font-size:0.75rem; border-radius:4px; cursor:pointer;">▶ Play</button>
       <input type="range" data-kb-timeline-slider min="0" max="0" value="0" style="width:160px; cursor:pointer;">
       <span data-kb-timeline-date style="font-size:0.75rem; font-family:monospace; min-width:80px; text-align:right;"></span>
+    </div>
+
+    <!-- Floating Subgraph Filter Drawer -->
+    <div class="kb-subgraph-drawer" data-kb-subgraph-drawer hidden>
+      <div class="kb-subgraph-header">
+        <div class="kb-subgraph-title">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <strong>Subgraph Filtering</strong>
+        </div>
+        <button type="button" class="kb-subgraph-close" data-kb-subgraph-close aria-label="Close">&times;</button>
+      </div>
+      <div class="kb-subgraph-body">
+        <div class="kb-subgraph-group">
+          <span class="kb-subgraph-label">Provenance Tiers</span>
+          <div class="kb-subgraph-checks">
+            <label class="kb-subgraph-check"><input type="checkbox" checked data-kb-filter-tier="curated"> <span class="kb-badge-curated">Curated</span></label>
+            <label class="kb-subgraph-check"><input type="checkbox" checked data-kb-filter-tier="deterministic"> <span class="kb-badge-deterministic">Deterministic</span></label>
+            <label class="kb-subgraph-check"><input type="checkbox" checked data-kb-filter-tier="inferred"> <span class="kb-badge-inferred">Inferred</span></label>
+          </div>
+        </div>
+
+        <div class="kb-subgraph-group">
+          <div class="kb-subgraph-row">
+            <span class="kb-subgraph-label">Min Confidence</span>
+            <output class="kb-subgraph-val" data-kb-filter-conf-val>0.00</output>
+          </div>
+          <input type="range" class="kb-subgraph-slider" data-kb-filter-conf-slider min="0" max="1" step="0.05" value="0">
+        </div>
+
+        <div class="kb-subgraph-footer">
+          <button type="button" class="kb-btn" data-kb-filter-reset>Reset</button>
+          <span class="kb-subgraph-summary" data-kb-filter-summary>All edges visible</span>
+        </div>
+      </div>
     </div>
 
 
@@ -230,6 +367,49 @@
   </div>
 </div>
 
+<div class="kb-modal-backdrop" data-kb-share-modal hidden>
+  <div class="kb-modal-panel kb-share-modal-panel">
+    <div class="kb-modal-header">
+      <h3 class="kb-modal-title">Share &amp; Embed Knowledge Graph</h3>
+      <button type="button" class="kb-modal-close" data-kb-share-close aria-label="Close modal">&times;</button>
+    </div>
+    <div class="kb-modal-body kb-share-modal-body">
+      <div class="kb-share-section">
+        <label class="kb-share-label">
+          <strong>Direct URL</strong>
+          <span>Link preserving active focus, coordinates, zoom level and filters</span>
+        </label>
+        <div class="kb-share-control-row">
+          <input type="text" readonly class="kb-share-input" data-kb-share-url spellcheck="false">
+          <button type="button" class="kb-btn is-active" data-kb-copy-url-btn>Copy Link</button>
+        </div>
+      </div>
+
+      <div class="kb-share-section">
+        <label class="kb-share-label">
+          <strong>Web Component Embed</strong>
+          <span>Autonomous &lt;corpusatlas-graph&gt; with zero external runtime dependencies</span>
+        </label>
+        <div class="kb-share-control-row">
+          <textarea readonly class="kb-share-textarea" data-kb-share-wc spellcheck="false" rows="3"></textarea>
+          <button type="button" class="kb-btn is-active" data-kb-copy-wc-btn>Copy Tag</button>
+        </div>
+      </div>
+
+      <div class="kb-share-section">
+        <label class="kb-share-label">
+          <strong>iFrame Embed</strong>
+          <span>Standard embed snippet for documentation sites, blogs or Notion</span>
+        </label>
+        <div class="kb-share-control-row">
+          <textarea readonly class="kb-share-textarea" data-kb-share-iframe spellcheck="false" rows="2"></textarea>
+          <button type="button" class="kb-btn is-active" data-kb-copy-iframe-btn>Copy iFrame</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="kb-toast" data-kb-toast>Link copied to clipboard</div>
 
 <script>
@@ -256,6 +436,6 @@
     });
   }
 </script>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=0.12.0"></script>
 </body>
 </html>

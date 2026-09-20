@@ -14,12 +14,15 @@ def test_viewer_extension_files_exist_and_export_interfaces():
         "export.js": ["exportPng", "exportSvg", "exportGexf", "exportGraphml"],
         "timeline.js": ["createTimelinePlayer"],
         "view3d.js": ["create3DGraphController"],
+        "diff.js": ["computeGraphDiff", "applyDiffFilter", "renderNodeAttributeDiff"],
+        "embed.js": ["CorpusAtlasGraph", "customElements.define"],
     }
 
     for filename, symbols in extensions.items():
         filepath = js_dir / filename
         assert filepath.exists(), f"viewer/js/{filename} must exist"
         content = filepath.read_text(encoding="utf-8")
+        assert "console.log" not in content, f"no console.log in {filename}"
         for sym in symbols:
             assert sym in content, f"{filename} must export or define {sym}"
 

@@ -11,9 +11,19 @@ from ..model import Document
 class GitHubAdapter:
     """Ingests GitHub issues and pull requests from JSON export files or directories."""
 
-    def __init__(self, path: str | Path, repo: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, path: str | Path, repo: Optional[str] = None,
+                 since: Optional[str] = None, cursor_file: Optional[str | Path] = None,
+                 **kwargs: Any) -> None:
         self.path = Path(path)
         self.repo = repo or "github/repo"
+        self.cursor_file = Path(cursor_file) if cursor_file else None
+        self.since = since
+        if self.cursor_file and self.cursor_file.exists() and not self.since:
+            try:
+                self.since = self.cursor_file.read_text(encoding="utf-8").strip() or None
+            except OSError:
+                pass
+        self._max_updated_at: Optional[str] = None
 
     def _parse_item(self, item: Dict[str, Any], default_repo: str) -> Optional[Document]:
         if not isinstance(item, dict):
@@ -21,6 +31,15 @@ class GitHubAdapter:
         num = item.get("number")
         if num is None:
             return None
+
+        # Incremental filter by timestamp
+        updated_at = item.get("updated_at") or item.get("created_at")
+        if updated_at:
+            up_str = str(updated_at)
+            if self._max_updated_at is None or up_str > self._max_updated_at:
+                self._max_updated_at = up_str
+            if self.since and up_str < self.since:
+                return None
 
         repo = self.repo or default_repo
         if "repository_url" in item and not self.repo:
@@ -69,6 +88,7 @@ class GitHubAdapter:
         if not self.path.exists():
             return
 
+        items_to_yield = []
         if self.path.is_file():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -80,7 +100,7 @@ class GitHubAdapter:
                 for it in items:
                     doc = self._parse_item(it, self.repo)
                     if doc:
-                        yield doc
+                        items_to_yield.append(doc)
         elif self.path.is_dir():
             for p in sorted(self.path.glob("**/*.json")):
                 try:
@@ -92,8 +112,17 @@ class GitHubAdapter:
                     for it in items:
                         doc = self._parse_item(it, self.repo)
                         if doc:
-                            yield doc
+                            items_to_yield.append(doc)
                 elif isinstance(items, dict):
                     doc = self._parse_item(items, self.repo)
                     if doc:
-                        yield doc
+                        items_to_yield.append(doc)
+
+        if self.cursor_file and self._max_updated_at:
+            try:
+                self.cursor_file.parent.mkdir(parents=True, exist_ok=True)
+                self.cursor_file.write_text(self._max_updated_at, encoding="utf-8")
+            except OSError:
+                pass
+
+        yield from items_to_yield

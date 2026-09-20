@@ -30,7 +30,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .model import Document
+from .model import Document, Edge, Node
 
 
 def hash_bytes(data: bytes) -> str:
@@ -49,8 +49,9 @@ class BuildCache:
     thread running that source, but the hit/miss counters and the on-disk
     `_data` dict are genuinely shared, hence the lock."""
 
-    def __init__(self, path: Path | None):
+    def __init__(self, path: Path | None, fine_grained: bool = False):
         self.path = path
+        self.fine_grained = fine_grained
         self.hits = 0
         self.misses = 0
         self._lock = threading.Lock()
@@ -61,8 +62,9 @@ class BuildCache:
             except (json.JSONDecodeError, OSError):
                 self._data = {}
 
-    def bucket(self, key: str) -> CacheBucket:
-        return CacheBucket(self, key, self._data.get(key) or {})
+    def bucket(self, key: str, fine_grained: bool | None = None) -> CacheBucket:
+        fg = self.fine_grained if fine_grained is None else fine_grained
+        return CacheBucket(self, key, self._data.get(key) or {}, fine_grained=fg)
 
     def _record_hit(self) -> None:
         with self._lock:
@@ -88,13 +90,14 @@ class CacheBucket:
     serialised Document, guarded by a fingerprint covering everything else
     that run's documents could have depended on."""
 
-    def __init__(self, cache: BuildCache, key: str, raw: dict):
+    def __init__(self, cache: BuildCache, key: str, raw: dict, fine_grained: bool = False):
         self._cache = cache
         self._key = key
         self._prev_fingerprint = tuple(raw.get("fingerprint", ()))
         self._prev_files: dict[str, dict] = raw.get("files", {})
         self._new_files: dict[str, dict] = {}
         self._valid = False
+        self.fine_grained = fine_grained
 
     def enter(self, fingerprint: tuple[str, ...]) -> None:
         """Call once per `documents()` run, before reading any file — this
@@ -104,7 +107,7 @@ class CacheBucket:
         self._valid = fingerprint == self._prev_fingerprint
 
     def get(self, path: str, content_hash: str) -> Document | None:
-        if not self._valid:
+        if not self._valid and not self.fine_grained:
             self._cache._record_miss()
             return None
         entry = self._prev_files.get(path)
@@ -112,6 +115,7 @@ class CacheBucket:
             self._cache._record_miss()
             return None
         self._cache._record_hit()
+        self._new_files[path] = entry
         data = dict(entry["document"])
         data["tags"] = tuple(data.get("tags") or ())
         data["links"] = tuple(data.get("links") or ())
@@ -211,4 +215,93 @@ class MerkleDAGCache:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._entries, sort_keys=True, indent=2), encoding="utf-8")
+
+
+def document_hash(doc: Document) -> str:
+    payload = f"{doc.id}\0{doc.kind}\0{doc.url}\0{doc.date or ''}\0{doc.text}\0{','.join(doc.tags)}\0{','.join(doc.links)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def run_extractor_cached(
+    extractor: Any,
+    docs: list[Document],
+    merkle: MerkleDAGCache | None = None
+) -> tuple[list[Node], list[Edge], int, int]:
+    """Run an extractor over documents, caching per-document claims in MerkleDAGCache.
+    Returns (nodes, edges, hits, misses).
+    """
+    if merkle is None:
+        out_n, out_e = extractor.run(docs)
+        return list(out_n), list(out_e), 0, len(docs)
+
+    hits = 0
+    misses = 0
+    cached_nodes: dict[str, Node] = {}
+    cached_edges: dict[tuple, Edge] = {}
+
+    all_cached = True
+    for doc in docs:
+        d_hash = document_hash(doc)
+        cached = merkle.get_claims(doc.id, d_hash, extractor.name)
+        if cached is None:
+            all_cached = False
+            break
+
+    if all_cached and docs:
+        for doc in docs:
+            d_hash = document_hash(doc)
+            cached = merkle.get_claims(doc.id, d_hash, extractor.name)
+            if not cached:
+                continue
+            raw_nodes, raw_edges = cached
+            for nd in raw_nodes:
+                n = Node(
+                    id=nd["id"],
+                    label=nd.get("label", nd["id"]),
+                    type=nd.get("type", "Technology"),
+                    url=nd.get("url"),
+                    meta=nd.get("meta", {}),
+                    aliases=tuple(nd.get("aliases", ())),
+                    urls=nd.get("urls", {})
+                )
+                cached_nodes[n.id] = n
+            for ed in raw_edges:
+                e = Edge(
+                    src=ed["src"],
+                    rel=ed["rel"],
+                    dst=ed["dst"],
+                    prov=ed.get("prov", {}),
+                    scope=ed.get("scope"),
+                    confidence=ed.get("confidence"),
+                    sources=tuple(ed.get("sources", ())),
+                    explanation=ed.get("explanation")
+                )
+                cached_edges[e.key] = e
+            hits += 1
+        return list(cached_nodes.values()), list(cached_edges.values()), hits, 0
+
+    # Otherwise, execute extractor over full docs to maintain cross-document join integrity
+    out_nodes, out_edges = extractor.run(docs)
+    node_list = list(out_nodes)
+    edge_list = list(out_edges)
+
+    doc_edges: dict[str, list[Edge]] = {d.id: [] for d in docs}
+    for e in edge_list:
+        doc_id = e.prov.get("doc")
+        if doc_id and doc_id in doc_edges:
+            doc_edges[doc_id].append(e)
+
+    for doc in docs:
+        d_hash = document_hash(doc)
+        merkle.put_claims(
+            doc.id,
+            d_hash,
+            extractor.name,
+            [n.to_json() for n in node_list if n.id == doc.id or n.type != "Document"],
+            [e.to_json() for e in doc_edges.get(doc.id, [])]
+        )
+        misses += 1
+
+    return node_list, edge_list, hits, misses
+
 

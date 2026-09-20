@@ -6,6 +6,7 @@
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20runtime-success.svg)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/corpusatlas?color=blue&logo=pypi&logoColor=white)](https://pypi.org/project/corpusatlas/)
 
 Turn a corpus of markdown and structured data into a knowledge graph you can
 ship as a static file.
@@ -46,7 +47,7 @@ adapters → resolve → extract (deterministic, then curated) → merge → gra
 No third-party dependencies. Python 3.11+.
 
 ```bash
-pip install git+https://github.com/anothernoise/corpusatlas@v0.11.0
+pip install git+https://github.com/anothernoise/corpusatlas@v0.12.0
 # Or with optional high-performance columnar extras:
 pip install "corpusatlas[all]"
 
@@ -258,6 +259,86 @@ this starts to matter. A real fix for a much larger graph would be
 precomputing layout coordinates at build time instead of laying out in the
 browser on every load; not done here since nothing this module's own
 consumer has needs it yet.
+
+## Integrations & Embeds
+
+### Standalone Web Component
+
+Ship any graph as a self-contained HTML custom element — no build step, no framework:
+
+```html
+<script type="module" src="https://unpkg.com/@corpusatlas/graph@0.12.0/embed.js"></script>
+<corpusatlas-graph data-src="graph.json"></corpusatlas-graph>
+```
+
+Or install via NPM:
+
+```bash
+npm install @corpusatlas/graph
+```
+
+See [`npm/corpusatlas-graph/README.md`](npm/corpusatlas-graph/README.md) for React, Next.js, and framework integration examples.
+
+### MkDocs Material Plugin
+
+Embed interactive graphs directly in MkDocs documentation using fenced code blocks:
+
+````markdown
+```corpusatlas
+src: graph.json
+height: 600
+theme: dark
+```
+````
+
+The plugin auto-transforms fences into `<corpusatlas-graph>` web components. Add to `mkdocs.yml`:
+
+```yaml
+plugins:
+  - corpusatlas
+```
+
+### Obsidian Export
+
+Export your knowledge graph as a native Obsidian vault or canvas:
+
+```bash
+# Interactive JSON Canvas (.canvas) for Obsidian Canvas view:
+corpusatlas export-obsidian --graph graph.json --format canvas --out graph.canvas
+
+# Markdown vault with [[wikilinks]] and YAML frontmatter:
+corpusatlas export-obsidian --graph graph.json --format vault --out-dir obsidian-vault/
+```
+
+### LLM Entity Extraction
+
+Automatically extract entities and relationships from unstructured text using any OpenAI-compatible or Ollama endpoint:
+
+```bash
+corpusatlas extract-llm --input docs/ --endpoint http://localhost:11434 --model llama3 --out extracted.toml
+```
+
+The output is a validated CorpusAtlas TOML semantic pack, ready to feed into the build pipeline.
+
+### Graph Semantic Projection
+
+Project vector embeddings to 2D/3D coordinates using pure-Python PCA (no numpy required):
+
+```bash
+corpusatlas project-embeddings --graph graph.json --dimensions 2 --out projected.json
+```
+
+The viewer's "Semantic Space" layout renders these coordinates directly.
+
+### Sub-Graph RBAC & Redaction
+
+Enforce role-based visibility and redact sensitive nodes before publishing:
+
+```bash
+corpusatlas redact --graph graph.json --role public --policy rbac.toml --out public_graph.json
+```
+
+Drops unauthorized nodes, sanitizes dangling edges, masks private attributes, and writes an audit log.
 
 ## Storage Engines & Out-of-Core Build
 
@@ -541,7 +622,7 @@ It grew inside that site's repository and was split out with
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). [CHANGELOG.md](CHANGELOG.md) has the
-version history; [docs/adapters.md](docs/adapters.md) lists all eight sources
+version history; [docs/adapters.md](docs/adapters.md) lists all eleven sources
 side by side.
 
 ## Licence

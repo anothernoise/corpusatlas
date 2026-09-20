@@ -4,6 +4,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) as closely as a package
 with no `1.0` yet reasonably can.
 
+## [0.12.0] — 2026-09-20
+
+### Added
+- **Standalone Web Component (`<corpusatlas-graph>`)**: Ship any knowledge graph as a self-contained `<corpusatlas-graph data-src="graph.json">` HTML custom element. Published as `@corpusatlas/graph` NPM package (`npm/corpusatlas-graph/`). New `corpusatlas export-wc` CLI subcommand generates embeddable bundles. Web component class in `viewer/js/embed.js`.
+- **Dynamic Visual Subgraph Filtering**: Interactive provenance-tier filtering (Curated / Deterministic / Inferred checkboxes), confidence threshold slider (0.00–1.00), and per-relation edge toggling in the web viewer. Subgraph Filter drawer with instant minimap redraw.
+- **Native MkDocs Material Plugin (`corpusatlas.integrations.mkdocs_plugin`)**: Auto-transforms ` ```corpusatlas ` markdown fences into `<corpusatlas-graph>` web components and injects CDN embed scripts. `CorpusAtlasPlugin(BasePlugin)` hooks page markdown transformation.
+- **Bi-Directional Obsidian Exporter (`corpusatlas.integrations.obsidian`)**:
+  - `export_obsidian_canvas(graph, out_path)`: Obsidian JSON Canvas (`.canvas`) with typed node colors, coordinates, and directional connectors.
+  - `export_obsidian_vault(graph, vault_dir)`: Markdown vault with YAML frontmatter, tags, and `[[wikilinks]]` for incoming/outgoing relations.
+  - New `corpusatlas export-obsidian` CLI subcommand.
+- **Graph Semantic Projection (`corpusatlas.projection`)**: Pure-Python PCA via power iteration and Gram-Schmidt orthogonalization projecting vector embeddings to 2D/3D coordinates without numpy/scipy. `compute_graph_semantic_projection()` annotates nodes with `semantic_x/y/z`. "Semantic Space (Embeddings)" layout option in the web viewer. New `corpusatlas project-embeddings` CLI subcommand.
+- **Automated LLM Entity & Triple Extraction Pipeline (`corpusatlas.extract_llm`)**: Standard-library HTTP client supporting Ollama & OpenAI-compatible endpoints with strict schema prompting, `filter_conforming_triples()` validation, and `convert_extracted_to_pack_toml()` serialization. `CONSUMES` relation added to ontology. New `corpusatlas extract-llm` CLI subcommand.
+- **Sub-Graph Role-Based Access Control (RBAC) & Node Redaction (`corpusatlas.rbac`)**: `RBACPolicy` clearance model with `redact_graph_by_role()` enforcing visibility levels, dropping unauthorized nodes, sanitizing dangling edges, masking private attributes, and generating audit logs. New `corpusatlas redact` CLI subcommand.
+- **Graph Visual Diff Viewer (`viewer/js/diff.js`)**: Compare two graph snapshots with color-coded overlays for added (green), removed (red), and changed (amber) nodes and edges. Toggleable filter buttons and closeable diff panel.
+- **Interactive 3D Flight Mode (`viewer/js/view3d.js`)**: Guided camera autopilot navigating through graph topology with configurable speed, FOV, trail rendering, dynamic node label billboarding, and edge glow effects. Draggable flight control panel with trip configuration (start node, traversal strategy, cluster hopping).
+- **Notebook Widget (`corpusatlas.notebook`)**: `show(graph)` and `to_html(graph)` for Jupyter/Colab inline rendering with interactive pan, zoom, and click-to-focus.
+- **Pagefind Static Search Index (`corpusatlas.pagefind`)**: Generate Pagefind-compatible search pages from graph entities for static site full-text search.
+- **Incremental Pipeline & Graph Delta (`corpusatlas.graph_delta`)**: Compute and apply incremental graph diffs for efficient pipeline reruns.
+
+### Changed
+- `corpusatlas publish` now recursively copies `viewer/js/` ES modules alongside `index.html`, `style.css`, and `app.js` for fully offline static deployments.
+- Viewer analytics buttons grouped into a cohesive toolbar (Clusters, Hubs, 3D, Timeline, Diff).
+- Share button generates proper embed snippets with `<iframe>` and `<corpusatlas-graph>` web component code.
+- Export menu shows format selection dropdown (SVG, PNG, GEXF, GraphML, JSON).
+
 ## [0.11.0] — 2026-09-20
 
 ### Added

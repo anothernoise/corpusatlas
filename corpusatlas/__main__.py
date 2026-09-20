@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from . import config as cfgmod
 from .adapters import build as build_adapter
-from .cache import BuildCache
+from .cache import BuildCache, MerkleDAGCache, run_extractor_cached
 from .csv_export import write_csv
 from .emit import SCHEMA_VERSION, write_graph
 from .export import export_duckdb
@@ -32,7 +32,7 @@ def cmd_build(args) -> int:
     cfg = cfgmod.load(args.config)
     schema = (cfg.get("ontology") or {}).get("schema")
     ontology = Ontology.from_toml(schema) if schema else DEFAULT
-    cache = BuildCache(Path(args.cache) if args.cache else None)
+    cache = BuildCache(Path(args.cache) if args.cache else None, fine_grained=getattr(args, "fine_cache", False))
     specs = cfg.get("sources", [])
     docs, sources = [], []
 
@@ -76,11 +76,24 @@ def cmd_build(args) -> int:
     # reviewed claim. Sequential, not a uniform loop, because mentions needs
     # to see what the earlier tiers named before it can search for it.
     det: Extractor = DeterministicExtractor(resolver=resolver, ontology=ontology)
-    det_out_nodes, det_out_edges = det.run(docs)
-    det_nodes, det_edges = list(det_out_nodes), list(det_out_edges)
     packs: Extractor = PacksExtractor.from_config(cfg, resolver=resolver, ontology=ontology)
-    packs_out_nodes, packs_out_edges = packs.run(docs)
-    pack_nodes, pack_edges = list(packs_out_nodes), list(packs_out_edges)
+
+    merkle_path = getattr(args, "merkle_cache", None)
+    merkle = MerkleDAGCache(Path(merkle_path)) if merkle_path else None
+
+    if merkle is not None:
+        det_nodes, det_edges, det_hits, det_misses = run_extractor_cached(det, docs, merkle)
+        pack_nodes, pack_edges, pack_hits, pack_misses = run_extractor_cached(packs, docs, merkle)
+        merkle.save()
+        total_claims = det_hits + det_misses + pack_hits + pack_misses
+        if total_claims > 0 and (det_hits + pack_hits) > 0:
+            print(f"  merkle-dag cache    {det_hits + pack_hits:>4}/{total_claims} claims reused")
+    else:
+        det_out_nodes, det_out_edges = det.run(docs)
+        det_nodes, det_edges = list(det_out_nodes), list(det_out_edges)
+        packs_out_nodes, packs_out_edges = packs.run(docs)
+        pack_nodes, pack_edges = list(packs_out_nodes), list(packs_out_edges)
+
     mentions: Extractor = MentionsExtractor(det_nodes + pack_nodes, resolver=resolver, ontology=ontology)
     ment_out_nodes, ment_out_edges = mentions.run(docs)
     ment_nodes, ment_edges = list(ment_out_nodes), list(ment_out_edges)
@@ -897,9 +910,127 @@ def cmd_publish(args) -> int:
         return 1
     shutil.copy2(gsrc, out_dir / "graph.json")
 
+    js_dir = viewer_dir / "js"
+    if js_dir.exists():
+        shutil.copytree(js_dir, out_dir / "js", dirs_exist_ok=True)
+
     print(f"Published static knowledge graph site to {out_dir}/")
     print(f"Serve locally with:\n  python3 -m http.server --directory {out_dir}")
     return 0
+
+
+def cmd_export_obsidian(args) -> int:
+    """Exports graph data as Obsidian Canvas (.canvas) and/or Markdown vault."""
+    import json
+    from corpusatlas.integrations.obsidian import export_obsidian_canvas, export_obsidian_vault
+
+    gpath = Path(args.graph)
+    if not gpath.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+
+    graph_data = json.loads(gpath.read_text(encoding="utf-8"))
+    count = 0
+    if args.canvas:
+        export_obsidian_canvas(graph_data, args.canvas)
+        print(f"Exported Obsidian Canvas to {args.canvas}")
+        count += 1
+    if args.vault:
+        n = export_obsidian_vault(graph_data, args.vault)
+        print(f"Exported {n} Obsidian notes to vault at {args.vault}/")
+        count += 1
+    if count == 0:
+        cpath = gpath.with_suffix(".canvas")
+        export_obsidian_canvas(graph_data, cpath)
+        print(f"Exported Obsidian Canvas to {cpath}")
+    return 0
+
+
+def cmd_project_embeddings(args) -> int:
+    """Projects dense embedding vectors to 2D/3D semantic space coordinates."""
+    import json
+    from corpusatlas.projection import compute_graph_semantic_projection
+
+    gpath = Path(args.graph)
+    if not gpath.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+
+    graph_data = json.loads(gpath.read_text(encoding="utf-8"))
+    projected = compute_graph_semantic_projection(graph_data, n_components=args.dims)
+    out_path = Path(args.out or args.graph)
+    out_path.write_text(json.dumps(projected, indent=2), encoding="utf-8")
+    print(f"Computed semantic {args.dims}D vector projection for {len(projected.get('nodes', []))} nodes -> {out_path}")
+    return 0
+
+
+def cmd_extract_llm(args) -> int:
+    """Extracts ontology-conforming entities and triples from text using LLM."""
+    from corpusatlas.extract_llm import extract_entities_and_triples_from_text, convert_extracted_to_pack_toml
+    from corpusatlas.ontology import Ontology
+
+    in_path = Path(args.input)
+    if not in_path.exists():
+        print(f"input path not found: {args.input}", file=sys.stderr)
+        return 1
+
+    ont = Ontology.from_toml(args.schema) if args.schema else None
+
+    text_parts = []
+    if in_path.is_file():
+        text_parts.append(in_path.read_text(encoding="utf-8"))
+    else:
+        for f in in_path.glob("**/*"):
+            if f.is_file() and f.suffix.lower() in (".md", ".txt", ".html"):
+                text_parts.append(f.read_text(encoding="utf-8"))
+
+    combined_text = "\n\n".join(text_parts)[:15000]
+    extracted = extract_entities_and_triples_from_text(
+        combined_text,
+        endpoint=args.endpoint,
+        model=args.model,
+        ontology=ont,
+    )
+
+    toml_content = convert_extracted_to_pack_toml(extracted, pack_name=in_path.stem)
+    out_file = Path(args.out)
+    out_file.write_text(toml_content, encoding="utf-8")
+    print(f"Extracted {len(extracted.get('entities', []))} entities and {len(extracted.get('relations', []))} relations -> {out_file}")
+    return 0
+
+
+def cmd_redact(args) -> int:
+    """Redacts graph based on role clearance policy."""
+    import json
+    from corpusatlas.rbac import redact_graph_by_role, RBACPolicy
+
+    gpath = Path(args.graph)
+    if not gpath.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+
+    policy = RBACPolicy.from_toml(args.policy) if args.policy else None
+    graph_data = json.loads(gpath.read_text(encoding="utf-8"))
+    redacted, audit = redact_graph_by_role(graph_data, role=args.role, policy=policy)
+
+    out_file = Path(args.out)
+    out_file.write_text(json.dumps(redacted, indent=2), encoding="utf-8")
+    print(f"Redacted graph for role '{args.role}': {audit['retained_nodes_count']} nodes retained ({audit['redacted_nodes_count']} redacted), {audit['retained_edges_count']} edges retained -> {out_file}")
+    return 0
+
+
+def cmd_export_wc(args) -> int:
+    """Exports autonomous <corpusatlas-graph> standalone web component bundle."""
+    import shutil
+    out_file = Path(args.out)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    src_wc = Path(__file__).resolve().parents[1] / "viewer" / "js" / "embed.js"
+    if src_wc.exists():
+        shutil.copy2(src_wc, out_file)
+        print(f"Exported standalone Web Component to {out_file}")
+        return 0
+    print("embed.js not found", file=sys.stderr)
+    return 1
 
 
 def cmd_scaffold(args) -> int:
@@ -976,6 +1107,42 @@ def cmd_watch(args) -> int:
         return 0
 
 
+def cmd_layout(args) -> int:
+    """Computes force-directed 2D, 3D, or Multi-Scale LOD coordinates."""
+    from .layout import compute_layout, compute_multiscale_layout
+    in_path = Path(args.graph)
+    if not in_path.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+    graph = json.loads(in_path.read_text(encoding="utf-8"))
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    if getattr(args, "multiscale", False):
+        compute_multiscale_layout(nodes, edges, iterations=getattr(args, "iterations", 60), dimensions=3 if args.three_d else 2)
+    else:
+        compute_layout(nodes, edges, iterations=getattr(args, "iterations", 60), three_d=args.three_d)
+
+    out_path = Path(args.out) if args.out else in_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+    print(f"computed layout for {len(nodes)} nodes (3D={args.three_d}, multiscale={getattr(args, 'multiscale', False)}) -> {out_path}")
+    return 0
+
+
+def cmd_index_pagefind(args) -> int:
+    """Generates Pagefind static search HTML pages from graph.json."""
+    from .pagefind import generate_pagefind_pages
+    graph_path = Path(args.graph)
+    if not graph_path.exists():
+        print(f"graph file not found: {args.graph}", file=sys.stderr)
+        return 1
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    out_dir = Path(args.out_dir)
+    count = generate_pagefind_pages(graph, out_dir, clean=args.clean)
+    print(f"wrote {count} Pagefind search document(s) to {out_dir}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="corpusatlas")
     p.add_argument("--version", action="version", version=f"corpusatlas {__version__}")
@@ -991,6 +1158,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--cache",
                    help="path to a file-parse cache (html_blog/obsidian/logseq only); "
                         "created if missing, reused and updated if present")
+    b.add_argument("--fine-cache", action="store_true",
+                   help="enable fine-grained per-file cache invalidation across directory changes")
+    b.add_argument("--merkle-cache", metavar="PATH",
+                   help="path to Merkle-DAG extractor cache (defaults to <cache>.merkle.json when --cache is used)")
     b.add_argument("--store", choices=["memory", "sqlite", "duckdb"], default="memory",
                    help="pipeline deduplication & staging engine: memory (default), sqlite (disk out-of-core), or duckdb")
     b.add_argument("--db-path",
@@ -1158,6 +1329,51 @@ def main(argv: list[str] | None = None) -> int:
     i = sub.add_parser("init", help="scaffold a starter config and entity registry")
     i.add_argument("--dir", default=".", help="directory to write into (default: current directory)")
     i.set_defaults(fn=cmd_init)
+
+    lay = sub.add_parser("layout", help="compute force-directed 2D, 3D, or Multi-Scale LOD coordinates")
+    lay.add_argument("--graph", required=True, help="path to graph.json")
+    lay.add_argument("--out", help="output path (defaults to overwriting input graph)")
+    lay.add_argument("--3d", dest="three_d", action="store_true", help="compute 3D coordinates (x, y, z)")
+    lay.add_argument("--multiscale", action="store_true", help="assign multi-scale Level of Detail (LOD) tiers")
+    lay.add_argument("--iterations", type=int, default=60, help="force simulation iterations (default: 60)")
+    lay.set_defaults(fn=cmd_layout)
+
+    pf = sub.add_parser("index-pagefind", help="generate Pagefind static search HTML documents")
+    pf.add_argument("--graph", required=True, help="path to graph.json")
+    pf.add_argument("--out-dir", default="dist/search_pages", help="output directory for search pages")
+    pf.add_argument("--clean", action="store_true", help="clean output directory before writing")
+    pf.set_defaults(fn=cmd_index_pagefind)
+
+    obs = sub.add_parser("export-obsidian", help="export graph as Obsidian Canvas or Markdown vault")
+    obs.add_argument("graph", nargs="?", default="graph.json", help="path to graph.json")
+    obs.add_argument("--canvas", help="output path for Obsidian Canvas .canvas file")
+    obs.add_argument("--vault", help="output directory for Obsidian Markdown vault notes")
+    obs.set_defaults(fn=cmd_export_obsidian)
+
+    pe = sub.add_parser("project-embeddings", help="project dense embedding vectors to 2D/3D semantic space coordinates")
+    pe.add_argument("graph", nargs="?", default="graph.json", help="path to graph.json")
+    pe.add_argument("--dims", type=int, default=3, choices=[2, 3], help="projection dimensions (2 or 3)")
+    pe.add_argument("--out", help="output path (defaults to overwriting input graph)")
+    pe.set_defaults(fn=cmd_project_embeddings)
+
+    ellm = sub.add_parser("extract-llm", help="extract ontology-conforming entities and triples from text using LLM")
+    ellm.add_argument("input", help="input file or directory containing raw text")
+    ellm.add_argument("--schema", help="optional path to ontology schema TOML")
+    ellm.add_argument("--endpoint", default="http://localhost:11434/api/generate", help="LLM inference HTTP endpoint")
+    ellm.add_argument("--model", default="llama3", help="model identifier")
+    ellm.add_argument("--out", default="extracted-pack.toml", help="output TOML pack path")
+    ellm.set_defaults(fn=cmd_extract_llm)
+
+    rd = sub.add_parser("redact", help="redact graph based on role clearance policy")
+    rd.add_argument("graph", nargs="?", default="graph.json", help="path to graph.json")
+    rd.add_argument("--role", default="public", help="role clearance level (e.g. public, internal, admin)")
+    rd.add_argument("--policy", help="path to custom rbac.toml policy file")
+    rd.add_argument("--out", default="redacted_graph.json", help="output redacted graph path")
+    rd.set_defaults(fn=cmd_redact)
+
+    wc = sub.add_parser("export-wc", help="export autonomous <corpusatlas-graph> standalone web component bundle")
+    wc.add_argument("--out", default="corpusatlas-graph.js", help="output JavaScript bundle path")
+    wc.set_defaults(fn=cmd_export_wc)
 
     args = p.parse_args(argv)
     return args.fn(args)

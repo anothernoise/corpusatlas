@@ -8,8 +8,9 @@ from .dataframe import (
     to_polars,
 )
 from .model import Document, Edge, Node
+from .notebook import show, to_html
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
 __all__ = [
     "__version__",
@@ -22,4 +23,6 @@ __all__ = [
     "to_polars",
     "to_pandas",
     "to_dict_records",
+    "show",
+    "to_html",
 ]
